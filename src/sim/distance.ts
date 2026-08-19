@@ -23,7 +23,15 @@ import type { BoatState, FishState } from './state.ts';
  *
  * The boat is on the surface, which is depth 0, so the vertical leg of the
  * triangle is just the fish's depth.
+ *
+ * Takes only the fields it reads rather than whole states, so `stepFight` can
+ * measure from the x it has just resolved for this tick without building a
+ * throwaway BoatState. The alternative was a second `hypot` at that call site,
+ * which is a second definition of line length that can drift from this one.
  */
-export function lineLength(boat: BoatState, fish: FishState): number {
+export function lineLength(
+  boat: Pick<BoatState, 'x'>,
+  fish: Pick<FishState, 'x' | 'depth'>,
+): number {
   return Math.hypot(fish.x - boat.x, fish.depth);
 }

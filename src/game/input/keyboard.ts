@@ -12,14 +12,15 @@ import type { FightInputs } from '../../sim/state.ts';
 
 /**
  * The keys a fight listens to. design.md section 2 lists A, D, shift plus a
- * direction, and the attack inputs still to come. The control scheme is
- * deliberately this small, so extra bindings are a design proposal rather than
- * a convenience to add in passing.
+ * direction, and one basic and one heavy attack, so only the heavy at task 3.4
+ * is still to come. The control scheme is deliberately this small, so extra
+ * bindings are a design proposal rather than a convenience to add in passing.
  */
 export interface FightControls {
   left: Phaser.Input.Keyboard.Key;
   right: Phaser.Input.Keyboard.Key;
   dash: Phaser.Input.Keyboard.Key;
+  attack: Phaser.Input.Keyboard.Key;
 }
 
 export function createFightControls(scene: Phaser.Scene): FightControls {
@@ -38,6 +39,10 @@ export function createFightControls(scene: Phaser.Scene): FightControls {
     // Either shift, since which hand is on it depends on how the player holds
     // A and D. Phaser reports both under the one SHIFT key code.
     dash: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT),
+    // Space, so the thumb has it while the fingers hold A and D and the little
+    // finger holds shift. Phaser captures the key by default, which also stops
+    // the browser scrolling the page underneath the canvas.
+    attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
   };
 }
 
@@ -54,5 +59,6 @@ export function readFightInputs(controls: FightControls): FightInputs {
     moveLeft: controls.left.isDown,
     moveRight: controls.right.isDown,
     dash: controls.dash.isDown,
+    attack: controls.attack.isDown,
   };
 }

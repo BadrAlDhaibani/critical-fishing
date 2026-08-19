@@ -13,6 +13,8 @@
  */
 
 import {
+  ATTACK_COOLDOWN_TICKS,
+  ATTACK_LINE_COST,
   BOAT_SPEED_PER_TICK,
   BOAT_WIDTH,
   DASH_DURATION_TICKS,
@@ -20,6 +22,8 @@ import {
   DASH_SPEED_PER_TICK,
   INTERNAL_WIDTH,
 } from '../data/config.ts';
+import { basicAttackDamage } from './damage.ts';
+import { lineLength } from './distance.ts';
 import type { FightInputs, FightState } from './state.ts';
 
 /**
@@ -94,14 +98,46 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     );
   }
 
-  // The boat object is rebuilt from scratch every tick, so every field has to
-  // be named here or it silently disappears one tick into the fight. Nothing
-  // spends hull yet: 1.7 charges the attack, 1.8 refills the pool and 1.9
-  // damages the hull.
+  // Counted down before the press is looked at, so a cooldown of exactly one
+  // tick is over by the time the next input arrives rather than swallowing it.
+  let attackCooldownRemaining = Math.max(
+    0,
+    state.boat.attackCooldownRemaining - 1,
+  );
+  let resistance = state.fish.resistance;
+
+  const attackPressed = inputs.attack && !state.boat.attackHeld;
+
+  // All or nothing, the same as the dash above. A pool that cannot pay the
+  // whole cost fires nothing rather than a weaker hit, so the last few points
+  // in the bar are a decision about which action to spend them on rather than
+  // a fraction of both.
   //
-  // The fish is static until task 1.11, so its state is carried forward by
-  // reference rather than copied. Safe only while nothing writes to it: the
-  // moment the AI lands, this becomes a new object like the boat's.
+  // Nothing here consults the dash. design.md section 2 makes the shared pool
+  // the thing that limits both, and attacking out of a dash is a real choice
+  // rather than a free one: it is the stamina that would have bought the next
+  // dodge.
+  if (
+    attackPressed &&
+    attackCooldownRemaining === 0 &&
+    line >= ATTACK_LINE_COST
+  ) {
+    line -= ATTACK_LINE_COST;
+    attackCooldownRemaining = ATTACK_COOLDOWN_TICKS;
+
+    // Measured from the x this tick just resolved, not the one the tick opened
+    // on, so a hit landed while moving is priced at the position the boat
+    // actually ends up in and the debug readout agrees with what was dealt.
+    const damage = basicAttackDamage(lineLength({ x }, state.fish));
+    resistance = Math.max(0, resistance - damage);
+  }
+
+  // Both objects are rebuilt from scratch every tick, so every field has to be
+  // named here or it silently disappears one tick into the fight. Nothing
+  // spends hull yet: 1.8 refills the pool and 1.9 damages the hull.
+  //
+  // The fish used to be carried forward by reference, which was only ever safe
+  // while nothing wrote to it. The basic attack writes to it.
   return {
     tick: state.tick + 1,
     boat: {
@@ -113,7 +149,14 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       dashTicksRemaining,
       dashDirection,
       dashHeld: inputs.dash,
+      attackCooldownRemaining,
+      attackHeld: inputs.attack,
     },
-    fish: state.fish,
+    fish: {
+      x: state.fish.x,
+      depth: state.fish.depth,
+      resistance,
+      resistanceMax: state.fish.resistanceMax,
+    },
   };
 }

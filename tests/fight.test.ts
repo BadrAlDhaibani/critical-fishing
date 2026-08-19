@@ -3,7 +3,11 @@ import { stepFight, BOAT_MIN_X, BOAT_MAX_X } from '../src/sim/fight.ts';
 import { createFightState, noInputs } from '../src/sim/state.ts';
 import type { FightInputs, FightState } from '../src/sim/state.ts';
 import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
+import { basicAttackDamage } from '../src/sim/damage.ts';
+import { lineLength } from '../src/sim/distance.ts';
 import {
+  ATTACK_COOLDOWN_TICKS,
+  ATTACK_LINE_COST,
   BOAT_SPEED_PER_TICK,
   BOAT_WIDTH,
   DASH_DISTANCE,
@@ -15,13 +19,15 @@ import {
   INTERNAL_WIDTH,
 } from '../src/data/config.ts';
 
-const LEFT: FightInputs = { moveLeft: true, moveRight: false, dash: false };
-const RIGHT: FightInputs = { moveLeft: false, moveRight: true, dash: false };
-const BOTH: FightInputs = { moveLeft: true, moveRight: true, dash: false };
+const LEFT: FightInputs = { ...noInputs(), moveLeft: true };
+const RIGHT: FightInputs = { ...noInputs(), moveRight: true };
+const BOTH: FightInputs = { ...noInputs(), moveLeft: true, moveRight: true };
 
 const DASH_RIGHT: FightInputs = { ...RIGHT, dash: true };
 const DASH_LEFT: FightInputs = { ...LEFT, dash: true };
 const DASH_NEUTRAL: FightInputs = { ...noInputs(), dash: true };
+
+const ATTACK: FightInputs = { ...noInputs(), attack: true };
 
 /** Run n ticks of one held input. */
 function hold(state: FightState, inputs: FightInputs, n: number): FightState {
@@ -297,6 +303,162 @@ describe('stepFight: dash', () => {
   });
 });
 
+describe('stepFight: basic attack', () => {
+  /** What the fish would take from where this state's boat is standing. */
+  function expectedDamage(state: FightState): number {
+    return basicAttackDamage(lineLength(state.boat, state.fish));
+  }
+
+  it('charges the pool at the moment of the press', () => {
+    const start = createFightState();
+    const after = stepFight(start, ATTACK);
+
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - ATTACK_LINE_COST);
+    expect(after.boat.attackCooldownRemaining).toBe(ATTACK_COOLDOWN_TICKS);
+  });
+
+  it('takes the resistance the curve says it should', () => {
+    const start = createFightState();
+    const after = stepFight(start, ATTACK);
+
+    expect(after.fish.resistance).toBe(
+      start.fish.resistance - expectedDamage(after),
+    );
+  });
+
+  // design.md section 2's central tradeoff, and the reason the movement axis
+  // carries three meanings at once. If this ever stops holding, the fight has
+  // stopped being about position.
+  it('hits harder from directly above the fish than from the wall', () => {
+    const start = createFightState();
+    const overhead: FightState = {
+      ...start,
+      boat: { ...start.boat, x: start.fish.x },
+    };
+    const wall: FightState = {
+      ...start,
+      boat: { ...start.boat, x: BOAT_MIN_X },
+    };
+
+    const close =
+      start.fish.resistance - stepFight(overhead, ATTACK).fish.resistance;
+    const far = start.fish.resistance - stepFight(wall, ATTACK).fish.resistance;
+
+    expect(close).toBeGreaterThan(far);
+  });
+
+  it('does not attack every tick while the key stays held', () => {
+    const start = createFightState();
+    const after = hold(start, ATTACK, 200);
+
+    // 200 ticks is ten cooldowns, so a key repeat would have emptied the pool
+    // several times over. One press is one attack.
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - ATTACK_LINE_COST);
+    expect(after.fish.resistance).toBe(
+      start.fish.resistance - expectedDamage(after),
+    );
+  });
+
+  it('refuses a fresh press while the cooldown is running', () => {
+    const start = createFightState();
+    const first = stepFight(start, ATTACK);
+
+    // Released and pressed again well inside the cooldown.
+    const released = stepFight(first, noInputs());
+    const second = stepFight(released, ATTACK);
+
+    expect(second.boat.line).toBe(DEFAULT_LINE_MAX - ATTACK_LINE_COST);
+  });
+
+  it('fires again on a fresh press once the cooldown has run out', () => {
+    const start = createFightState();
+    let state = stepFight(start, ATTACK);
+    state = hold(state, noInputs(), ATTACK_COOLDOWN_TICKS);
+
+    expect(state.boat.attackCooldownRemaining).toBe(0);
+
+    const second = stepFight(state, ATTACK);
+    expect(second.boat.line).toBe(DEFAULT_LINE_MAX - 2 * ATTACK_LINE_COST);
+  });
+
+  it('refuses entirely on a pool that cannot pay in full', () => {
+    const start = createFightState();
+    const broke: FightState = {
+      ...start,
+      boat: { ...start.boat, line: ATTACK_LINE_COST - 1 },
+    };
+    const after = stepFight(broke, ATTACK);
+
+    expect(after.boat.line).toBe(ATTACK_LINE_COST - 1);
+    expect(after.fish.resistance).toBe(start.fish.resistance);
+    expect(after.boat.attackCooldownRemaining).toBe(0);
+  });
+
+  it('fires on a pool holding exactly the cost', () => {
+    const start = createFightState();
+    const exact: FightState = {
+      ...start,
+      boat: { ...start.boat, line: ATTACK_LINE_COST },
+    };
+    const after = stepFight(exact, ATTACK);
+
+    expect(after.boat.line).toBe(0);
+    expect(after.fish.resistance).toBeLessThan(start.fish.resistance);
+  });
+
+  it('runs the pool down over ten attacks and then refuses', () => {
+    let state = createFightState();
+
+    // Ten is what the default pool buys. Each attack is a press, a release, and
+    // the cooldown, so the next press registers as an edge on a ready attack.
+    for (let i = 0; i < 10; i++) {
+      state = stepFight(state, ATTACK);
+      state = hold(state, noInputs(), ATTACK_COOLDOWN_TICKS);
+    }
+    expect(state.boat.line).toBe(0);
+
+    const resistanceLeft = state.fish.resistance;
+    const eleventh = stepFight(state, ATTACK);
+
+    expect(eleventh.fish.resistance).toBe(resistanceLeft);
+  });
+
+  it('lands during a dash without disturbing it', () => {
+    const start = createFightState();
+    const dashing = stepFight(start, DASH_RIGHT);
+
+    // Attacking mid-flight. The dash key is released, so this is not a second
+    // dash press; the pool pays for both actions.
+    const attacked = hold(dashing, ATTACK, DASH_DURATION_TICKS - 1);
+
+    expect(attacked.boat.x - start.boat.x).toBeCloseTo(DASH_DISTANCE, 8);
+    expect(attacked.boat.line).toBe(
+      DEFAULT_LINE_MAX - DASH_LINE_COST - ATTACK_LINE_COST,
+    );
+    expect(attacked.fish.resistance).toBeLessThan(start.fish.resistance);
+  });
+
+  // The win state is task 1.12. Until then the fish sits at zero rather than
+  // going negative and dragging the bar backwards.
+  it('clamps resistance at zero rather than going negative', () => {
+    const start = createFightState();
+    const nearlyLanded: FightState = {
+      ...start,
+      fish: { ...start.fish, resistance: 1 },
+    };
+    const after = stepFight(nearlyLanded, ATTACK);
+
+    expect(after.fish.resistance).toBe(0);
+  });
+
+  it('leaves the fish alone when nothing is pressed', () => {
+    const start = createFightState();
+    const after = hold(start, RIGHT, 300);
+
+    expect(after.fish.resistance).toBe(start.fish.resistance);
+  });
+});
+
 describe('stepFight: the pool only goes down', () => {
   /**
    * Task 1.8 is what adds regeneration, and it is expected to change this test
@@ -313,7 +475,9 @@ describe('stepFight: the pool only goes down', () => {
     for (const moveLeft of [false, true]) {
       for (const moveRight of [false, true]) {
         for (const dash of [false, true]) {
-          combinations.push({ moveLeft, moveRight, dash });
+          for (const attack of [false, true]) {
+            combinations.push({ moveLeft, moveRight, dash, attack });
+          }
         }
       }
     }
@@ -368,6 +532,21 @@ describe('stepFight: purity', () => {
     const after = hold(start, RIGHT, 300);
 
     expect(after.fish).toEqual(start.fish);
+  });
+
+  // The fish used to be carried forward by reference. The basic attack writes
+  // to its resistance, so it is now rebuilt field by field like the boat, and
+  // it falls into the same trap: a field left unnamed there disappears one tick
+  // into the fight.
+  it('rebuilds the fish rather than sharing it, keeping every field', () => {
+    const start = createFightState();
+    const after = stepFight(start, ATTACK);
+
+    expect(after.fish).not.toBe(start.fish);
+    expect(after.fish.x).toBe(start.fish.x);
+    expect(after.fish.depth).toBe(start.fish.depth);
+    expect(after.fish.resistanceMax).toBe(start.fish.resistanceMax);
+    expect(start.fish.resistance).toBe(FISH_RESISTANCE_MAX);
   });
 
   // The boat object is rebuilt every tick around the one field that changes,

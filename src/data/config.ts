@@ -99,6 +99,40 @@ export const DASH_SPEED_PER_TICK = DASH_DISTANCE / DASH_DURATION_TICKS;
  */
 export const DASH_LINE_COST = 16;
 
+/**
+ * The basic attack. Chosen 2026-08-19, see decisions.md.
+ *
+ * Half a dash, so ten attacks come out of a full default pool against five
+ * dashes. That ordering is the point: attacking is the ordinary habit and the
+ * dash is the expensive panic, which is how design.md section 2 frames the
+ * contested resource. Every dash taken is two hits not landed.
+ *
+ * The cooldown is what stops the attack being held down. One press is one
+ * attack regardless, but at 20 ticks the pool also cannot be emptied faster
+ * than about 3.3 seconds, and there is a readable gap between hits to watch the
+ * fish through once it starts attacking at 1.9.
+ */
+export const ATTACK_LINE_COST = 8;
+export const ATTACK_COOLDOWN_TICKS = 20;
+
+/**
+ * The damage-by-distance curve. Chosen 2026-08-19, see decisions.md.
+ *
+ * design.md section 2: damage scales inversely with line length, and that
+ * coupling is the whole fight. Twenty perfect hits land the 400-resistance grey
+ * box fish; sixty-six from across the lane do the same job far more slowly.
+ *
+ * ATTACK_FULL_DAMAGE_RANGE is where the curve tops out rather than a separate
+ * tuned number: it is the fish's starting depth, so being directly above the
+ * fish is a reachable perfect hit rather than a theoretical one. Once the AI
+ * owns depth at task 1.11 a diving fish puts full damage out of reach and a
+ * shallow one hands it back, which is exactly the earned window design.md
+ * section 3 asks depth to produce.
+ */
+export const ATTACK_DAMAGE_MAX = 20;
+export const ATTACK_DAMAGE_MIN = 6;
+export const ATTACK_FULL_DAMAGE_RANGE = 100;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;

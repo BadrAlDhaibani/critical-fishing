@@ -327,3 +327,56 @@ to change that test deliberately.**
 
 Also renamed in the readout: the tether's length is now labelled `tether`, since
 `stam` sits next to it and design.md calls both of them the line.
+
+## 2026-08-19: The basic attack costs 8, deals 20 to 6, and the curve is a true inverse
+
+Six of the design.md section 8 open questions answered at once, because the
+attack cannot be judged with any of them missing.
+
+Cost **8**, half a dash, so a full default pool buys ten attacks or five dashes.
+The ordering is the point: attacking is the ordinary habit and the dash is the
+expensive panic, which is how design.md section 2 frames the contested resource.
+Every dash taken is two hits not landed.
+
+Cooldown **20 ticks**, three attacks a second. One press is one attack
+regardless, so this is not what stops the key being held; it is what stops the
+pool being emptied in a fraction of a second, and from 1.9 it is the gap the
+fish's telegraphs have to be read through.
+
+Damage **20 close, 6 far**. Twenty perfect hits land the 400-resistance grey box
+fish, sixty-six from across the lane do the same job far more slowly.
+
+The curve is a **true inverse**, `k / length`, not a straight line between the
+anchors and not a smoothstep. Chosen because it is steepest exactly where the
+decision is hardest: fifty units off perfect already costs a third of the hit,
+while the far half of the lane is uniformly weak, so there is a real gradient to
+climb rather than a flat outside. It is also the literal reading of design.md
+section 2's "damage scales inversely with line length".
+
+`k` is derived as `ATTACK_DAMAGE_MAX * ATTACK_FULL_DAMAGE_RANGE`, so the anchors
+and the curve cannot drift apart during the 1.13 tuning pass. The full-damage
+range is **100**, the fish's starting depth, so a perfect hit is reachable in
+this playtest rather than theoretical. Once the AI owns depth at 1.11, a diving
+fish puts full damage out of reach and a shallow one hands it back, which is the
+earned window the "fish positioning is never random" entry exists to protect.
+Damage is rounded to a whole number inside the curve rather than at the call
+site, so the readout, the tests and the resistance actually dealt are all one
+number.
+
+**Space** fires it, so the thumb has it while the fingers hold A and D and the
+little finger holds shift. **Attacking during a dash is allowed**: the shared
+pool is already what limits both, and getting a weak long-range hit off while
+fleeing is a real choice rather than a free one.
+
+Confirmed by playtest the same day and not retuned.
+
+Two consequences worth recording. The fish is no longer carried forward by
+reference in `stepFight`, because the attack is the first code that writes to
+it; the previous entry expected that to happen at 1.11. And the readout gained
+`resist` and `dmg`, the latter running the same function the simulation charges
+with, since the curve is the one thing in the fight that cannot be judged from a
+bar.
+
+Rejected: costs of 12 and 16, cooldowns of 12 and 30 ticks, 15/5 and 28/7
+damage, a linear curve, a smoothstep curve, J and the left mouse button, and
+locking attacks out for the duration of a dash.

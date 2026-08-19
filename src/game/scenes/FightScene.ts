@@ -23,6 +23,7 @@ import {
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
 import { stepFight } from '../../sim/fight.ts';
 import { lineLength } from '../../sim/distance.ts';
+import { basicAttackDamage } from '../../sim/damage.ts';
 import { createFightState, noInputs } from '../../sim/state.ts';
 import type { FightInputs, FightState } from '../../sim/state.ts';
 import {
@@ -179,6 +180,7 @@ export class FightScene extends Phaser.Scene {
     const tickRate = seconds > 0 ? this.driver.totalTicks / seconds : 0;
 
     const { boat, fish } = this.driver.current;
+    const tether = lineLength(boat, fish);
 
     this.overlay.update({
       resolution: `${INTERNAL_WIDTH}x${INTERNAL_HEIGHT}`,
@@ -193,7 +195,13 @@ export class FightScene extends Phaser.Scene {
       staminaMax: boat.lineMax,
       // From the simulation state, not from the interpolated render positions.
       // The readout is there to show what the fight is actually working with.
-      lineLength: lineLength(boat, fish),
+      lineLength: tether,
+      resistance: fish.resistance,
+      resistanceMax: fish.resistanceMax,
+      // The same function the simulation charges the fish with, so the number
+      // on screen is a prediction of the next hit rather than a second opinion
+      // about it.
+      attackDamage: basicAttackDamage(tether),
     });
   }
 }

@@ -44,6 +44,18 @@ export interface DebugFields {
    * out of it, so it needs to be readable while moving.
    */
   lineLength: number;
+  /** The fish's resistance, current and full. */
+  resistance: number;
+  resistanceMax: number;
+  /**
+   * What a basic attack would deal from where the boat is standing right now.
+   *
+   * The curve is the one thing in the fight that cannot be judged from a bar:
+   * a hit is worth between 6 and 20 and the difference is the whole point of
+   * moving. Shown as the number the attack would actually take off, so it can
+   * be checked against the resistance dropping.
+   */
+  attackDamage: number;
 }
 
 export class DebugOverlay {
@@ -69,6 +81,8 @@ export class DebugOverlay {
       `hull   ${fields.hull}/${fields.hullMax}`,
       `stam   ${fields.stamina}/${fields.staminaMax}`,
       `tether ${fields.lineLength.toFixed(1)} u`,
+      `resist ${fields.resistance}/${fields.resistanceMax}`,
+      `dmg    ${fields.attackDamage}`,
     ].join('\n');
   }
 }

@@ -68,6 +68,21 @@ export interface BoatState {
    * the edge out. The same code then runs on both sides.
    */
   dashHeld: boolean;
+  /**
+   * Ticks until the basic attack can be fired again, or 0 when it is ready.
+   *
+   * One press is one attack regardless of this, so the cooldown is not what
+   * stops the key being held down. It is what stops the pool being emptied in a
+   * fraction of a second, and from task 1.9 it is the gap the fish's telegraphs
+   * have to be read through.
+   */
+  attackCooldownRemaining: number;
+  /**
+   * Whether the attack key was held on the previous tick. The same edge
+   * detection as `dashHeld` above, done in the same place for the same phase 7
+   * reason.
+   */
+  attackHeld: boolean;
 }
 
 export interface FishState {
@@ -116,6 +131,12 @@ export interface FightInputs {
    * manufacture presses.
    */
   dash: boolean;
+  /**
+   * Whether the attack key is held right now. Held state for the same reason
+   * `dash` is: the press edge is the simulation's to work out, not the input
+   * layer's and certainly not a network client's.
+   */
+  attack: boolean;
 }
 
 /**
@@ -138,6 +159,8 @@ export function createFightState(): FightState {
       dashTicksRemaining: 0,
       dashDirection: 0,
       dashHeld: false,
+      attackCooldownRemaining: 0,
+      attackHeld: false,
     },
     fish: {
       x: FISH_START_X,
@@ -150,5 +173,5 @@ export function createFightState(): FightState {
 
 /** No input at all. Useful as a starting value and in tests. */
 export function noInputs(): FightInputs {
-  return { moveLeft: false, moveRight: false, dash: false };
+  return { moveLeft: false, moveRight: false, dash: false, attack: false };
 }
