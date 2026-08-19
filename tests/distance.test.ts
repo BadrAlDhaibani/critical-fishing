@@ -4,8 +4,17 @@ import { createFightState } from '../src/sim/state.ts';
 import type { BoatState, FishState } from '../src/sim/state.ts';
 import { INTERNAL_WIDTH } from '../src/data/config.ts';
 
-const boatAt = (x: number): BoatState => ({ x });
-const fishAt = (x: number, depth: number): FishState => ({ x, depth });
+// Built off a real fight rather than from literals, so fields lineLength does
+// not care about (hull, resistance and the rest) cannot break these helpers
+// every time the state grows one.
+const OPENING = createFightState();
+
+const boatAt = (x: number): BoatState => ({ ...OPENING.boat, x });
+const fishAt = (x: number, depth: number): FishState => ({
+  ...OPENING.fish,
+  x,
+  depth,
+});
 
 describe('lineLength', () => {
   it('is the depth when the boat is directly above the fish', () => {

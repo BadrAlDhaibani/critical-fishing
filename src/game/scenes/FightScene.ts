@@ -12,6 +12,13 @@ import {
   COLOUR_BOAT,
   COLOUR_FISH,
   COLOUR_LINE,
+  COLOUR_BAR_HULL,
+  COLOUR_BAR_LINE,
+  COLOUR_BAR_RESISTANCE,
+  BAR_WIDTH,
+  BAR_HEIGHT,
+  BAR_MARGIN,
+  BAR_GAP,
 } from '../../data/config.ts';
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
 import { stepFight } from '../../sim/fight.ts';
@@ -24,6 +31,7 @@ import {
   type FightControls,
 } from '../input/keyboard.ts';
 import { DebugOverlay } from '../render/debugOverlay.ts';
+import { Bar } from '../render/bars.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -38,6 +46,10 @@ export class FightScene extends Phaser.Scene {
   private boat!: Phaser.GameObjects.Rectangle;
   private fish!: Phaser.GameObjects.Rectangle;
   private line!: Phaser.GameObjects.Graphics;
+
+  private hullBar!: Bar;
+  private lineBar!: Bar;
+  private resistanceBar!: Bar;
 
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
@@ -90,6 +102,23 @@ export class FightScene extends Phaser.Scene {
       COLOUR_FISH,
     );
 
+    // Both sides' bars live in the sky above the waterline: the player's
+    // stacked at the left, the fish's at the right, so the fight reads as one
+    // against the other and neither ever moves.
+    this.hullBar = new Bar(this, BAR_MARGIN, BAR_MARGIN, COLOUR_BAR_HULL);
+    this.lineBar = new Bar(
+      this,
+      BAR_MARGIN,
+      BAR_MARGIN + BAR_HEIGHT + BAR_GAP,
+      COLOUR_BAR_LINE,
+    );
+    this.resistanceBar = new Bar(
+      this,
+      INTERNAL_WIDTH - BAR_MARGIN - BAR_WIDTH,
+      BAR_MARGIN,
+      COLOUR_BAR_RESISTANCE,
+    );
+
     this.overlay = new DebugOverlay();
   }
 
@@ -121,7 +150,22 @@ export class FightScene extends Phaser.Scene {
     this.line.lineStyle(1, COLOUR_LINE);
     this.line.lineBetween(boatX, WATER_LINE_Y, fishX, fishY);
 
+    this.updateBars();
     this.updateReadout(delta);
+  }
+
+  /**
+   * Read straight off the current simulation state, not interpolated like the
+   * positions above. A resource that drops in one tick should snap: smearing it
+   * across a frame blunts exactly the impact that phase 2's hit stop and hit
+   * flash exist to sharpen. Nothing moves any of these three yet.
+   */
+  private updateBars(): void {
+    const { boat, fish } = this.driver.current;
+
+    this.hullBar.set(boat.hull, boat.hullMax);
+    this.lineBar.set(boat.line, boat.lineMax);
+    this.resistanceBar.set(fish.resistance, fish.resistanceMax);
   }
 
   private updateReadout(delta: number): void {

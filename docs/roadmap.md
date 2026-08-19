@@ -13,28 +13,49 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.4, fish and line. Tests, lint and build green, and
-  the playtest passed. Both gates closed.
-- **In a half state:** nothing.
-- **Next task:** 1.5, bars. 1.2c is still open and still not gameplay-blocking.
-- **Open from last playtest:** 1.4 passed as built, unchanged. The static fish at
-  x 340, depth 100 and the 1px line both read correctly at 3x windowed.
-- **Carried out of 1.4, needed before 1.5:**
+- **Last completed task:** 1.4, fish and line. Both gates closed.
+- **In a half state:** 1.5, bars. Tests, lint and build are green. **The
+  playtest gate has not closed**, so the task is not done.
+- **Next task:** 1.6, dash, once 1.5 is confirmed. 1.2c is still open and still
+  not gameplay-blocking.
+- **Values settled this session.** These answer part of design.md section 8 and
+  must not be re-invented. The decisions.md entry recording them is written up
+  in the batch report and is **still to be appended**:
+  - Default boat hull: 100. Default line stamina pool: 80. Grey box fish
+    resistance: 400.
+  - Hull HP and stamina pool are properties of the **boat and line the player
+    has unlocked**, Dark Souls style, not game constants. Later boats run 140,
+    200, 1000; a bigger pool is what makes later expensive attacks affordable,
+    so a newbie line cannot fire a heavy attack without draining the bar. This
+    is why the maxima live on `FightState` and `data/config.ts` holds only the
+    default loadout, read in exactly one place, `createFightState`.
+  - Stamina sits below hull deliberately. Badr asked for the two not to be
+    "matchy matchy" and left the figure to me. A test asserts the inequality.
+  - Bar layout, picked from a mockup: hull and line stacked top left, fish
+    resistance top right.
+- **Carried out of 1.5, needed before 1.6:**
+  - Nothing spends or refills anything yet. 1.6 charges the dash against
+    `boat.line`, 1.7 the attack, 1.8 refills it, 1.9 damages `boat.hull`. All
+    of those costs are still open questions in design.md section 8: **ask.**
+  - `stepFight` rebuilds `boat` from scratch every tick, so every new field has
+    to be named there or it vanishes after one tick. Guarded by a test now.
+  - `fish` is still carried forward by reference. Stops being safe at 1.11.
+  - Bars are game objects inside the pixel grid, not DOM. `game/render/bars.ts`
+    draws them; the pure fill maths is in `game/render/barGeometry.ts` so it can
+    be tested without Phaser. Any value above zero draws at least 1 unit, so a
+    living boat never shows an empty bar.
+  - The DOM debug readout moved from the top left to the bottom left of the
+    window, because at 4x it sat directly on top of the new bars.
+  - `tests/distance.test.ts` builds its boats and fish by spreading a real
+    `createFightState()`, so growing the state does not break it again.
   - Line length is euclidean and includes depth, and lives in `sim/distance.ts`
     as `lineLength(boat, fish)`. Derived on demand, never stored on
     `FightState`. See decisions.md, which also records why horizontal-only was
-    rejected: do not "simplify" it back to `Math.abs`.
+    rejected: do not "simplify" it back to `Math.abs`. Note that `boat.line`,
+    the stamina pool, is a different thing entirely from the tether whose length
+    this measures. design.md calls both "line".
   - Fish depth is units below the waterline, not a screen y. `sim/` never sees
     `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
-  - `stepFight` carries `fish` forward by reference because the fish is still
-    static. That stops being safe the moment 1.11 writes to it.
-  - 1.5 needs four numbers that are all in the design.md section 8 open
-    questions: hull HP, line pool size, regeneration rate, fish resistance.
-    **Ask Badr, do not invent them.** Regeneration rate is 1.8's, but the pool
-    size it refills has to be picked now.
-  - Bars are game objects inside the pixel grid, not DOM. The DOM overlay is for
-    debug and tuning text only. See the 2026-08-19 decisions.md entry.
-  - There are 70 units of sky above the waterline and the bars go there.
 - **Noticed but not acted on:**
   - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
     readings still have not been taken**, so the diagnosis has not started.

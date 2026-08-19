@@ -51,12 +51,23 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     BOAT_MAX_X,
   );
 
+  // The boat object is rebuilt from scratch every tick, so every field has to
+  // be named here or it silently disappears one tick into the fight. Nothing
+  // spends hull or line yet: 1.6 charges the dash, 1.7 the attack, 1.8 refills
+  // the pool and 1.9 damages the hull.
+  //
   // The fish is static until task 1.11, so its state is carried forward by
   // reference rather than copied. Safe only while nothing writes to it: the
   // moment the AI lands, this becomes a new object like the boat's.
   return {
     tick: state.tick + 1,
-    boat: { x },
+    boat: {
+      x,
+      hull: state.boat.hull,
+      hullMax: state.boat.hullMax,
+      line: state.boat.line,
+      lineMax: state.boat.lineMax,
+    },
     fish: state.fish,
   };
 }

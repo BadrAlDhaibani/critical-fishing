@@ -24,10 +24,14 @@
         image-rendering: pixelated;
       }
       /* Debug readout. Deliberately outside the canvas so it renders at native
-         resolution and stays sharp at any zoom. See game/render/debugOverlay. */
+         resolution and stays sharp at any zoom. See game/render/debugOverlay.
+
+         Bottom left rather than top left since task 1.5: the hull and line bars
+         are game objects in the sky at the canvas's top left, and debug chrome
+         does not get to sit on top of the UI it is there to help tune. */
       #debug {
         position: fixed;
-        top: 8px;
+        bottom: 8px;
         left: 8px;
         margin: 0;
         font:

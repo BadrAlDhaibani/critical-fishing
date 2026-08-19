@@ -6,6 +6,9 @@ import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
 import {
   BOAT_SPEED_PER_TICK,
   BOAT_WIDTH,
+  DEFAULT_HULL_MAX,
+  DEFAULT_LINE_MAX,
+  FISH_RESISTANCE_MAX,
   INTERNAL_WIDTH,
 } from '../src/data/config.ts';
 
@@ -21,6 +24,33 @@ function hold(state: FightState, inputs: FightInputs, n: number): FightState {
   }
   return next;
 }
+
+describe('createFightState: opening resources', () => {
+  it('starts both sides on a full bar', () => {
+    const start = createFightState();
+
+    expect(start.boat.hull).toBe(start.boat.hullMax);
+    expect(start.boat.line).toBe(start.boat.lineMax);
+    expect(start.fish.resistance).toBe(start.fish.resistanceMax);
+  });
+
+  it('seeds the maxima from the default loadout', () => {
+    const start = createFightState();
+
+    expect(start.boat.hullMax).toBe(DEFAULT_HULL_MAX);
+    expect(start.boat.lineMax).toBe(DEFAULT_LINE_MAX);
+    expect(start.fish.resistanceMax).toBe(FISH_RESISTANCE_MAX);
+  });
+
+  // Stamina below hull is deliberate, see decisions.md. Two bars on the same
+  // number read as one value shown twice, and they have to be told apart at a
+  // glance while being hit.
+  it('gives the starting line a smaller pool than the starting hull', () => {
+    const start = createFightState();
+
+    expect(start.boat.lineMax).toBeLessThan(start.boat.hullMax);
+  });
+});
 
 describe('stepFight: boat movement', () => {
   it('moves right by exactly one tick of speed', () => {
@@ -116,6 +146,18 @@ describe('stepFight: purity', () => {
     const after = hold(start, RIGHT, 300);
 
     expect(after.fish).toEqual(start.fish);
+  });
+
+  // The boat object is rebuilt every tick around the one field that changes,
+  // so it falls into the same trap the fish test above guards against.
+  it('carries the boat resources forward unchanged', () => {
+    const start = createFightState();
+    const after = hold(start, RIGHT, 300);
+
+    expect(after.boat.hull).toBe(start.boat.hull);
+    expect(after.boat.hullMax).toBe(start.boat.hullMax);
+    expect(after.boat.line).toBe(start.boat.line);
+    expect(after.boat.lineMax).toBe(start.boat.lineMax);
   });
 
   it('is deterministic', () => {
