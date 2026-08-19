@@ -34,6 +34,8 @@ export const COLOUR_SKY = 0x1b2b3a;
 export const COLOUR_WATER = 0x1c5c86;
 export const COLOUR_SURFACE = 0x3f8fbf;
 export const COLOUR_BOAT = 0xd8cfc0;
+export const COLOUR_FISH = 0x2b2f3a;
+export const COLOUR_LINE = 0xe8e4da;
 
 /**
  * Boat movement. Chosen 2026-08-19, see decisions.md.
@@ -60,3 +62,19 @@ export const BOAT_HEIGHT = 10;
 
 /** Boat starts centred, so neither wall is nearer at the opening of a fight. */
 export const BOAT_START_X = INTERNAL_WIDTH / 2;
+
+/** Fish size. Wider than tall, so it reads as a fish and not as a second boat. */
+export const FISH_WIDTH = 20;
+export const FISH_HEIGHT = 12;
+
+/**
+ * Where the fish sits. Static for task 1.4; the AI takes both over at 1.11.
+ *
+ * Depth counts down from the waterline, so 100 draws at y 170 and the boat is
+ * implicitly at depth 0. Chosen 2026-08-19, see decisions.md: 100 units right of
+ * the boat's start opens the fight on a diagonal line rather than a vertical
+ * one, and mid-water leaves room either side for the fish to rise and dive once
+ * it can.
+ */
+export const FISH_START_X = 340;
+export const FISH_START_DEPTH = 100;

@@ -13,14 +13,28 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.3, boat movement. Tests, lint and build green, and
+- **Last completed task:** 1.4, fish and line. Tests, lint and build green, and
   the playtest passed. Both gates closed.
 - **In a half state:** nothing.
-- **Next task:** 1.4, fish and line. 1.2c is still open and still not
-  gameplay-blocking.
-- **Open from last playtest:** 1.3 passed as built. Speed of 90 u/s felt right
-  first try and was not adjusted; expect it to move during 1.13 anyway. The
-  1-then-2 screen-unit stepping from `roundPixels` did not read as judder.
+- **Next task:** 1.5, bars. 1.2c is still open and still not gameplay-blocking.
+- **Open from last playtest:** 1.4 passed as built, unchanged. The static fish at
+  x 340, depth 100 and the 1px line both read correctly at 3x windowed.
+- **Carried out of 1.4, needed before 1.5:**
+  - Line length is euclidean and includes depth, and lives in `sim/distance.ts`
+    as `lineLength(boat, fish)`. Derived on demand, never stored on
+    `FightState`. See decisions.md, which also records why horizontal-only was
+    rejected: do not "simplify" it back to `Math.abs`.
+  - Fish depth is units below the waterline, not a screen y. `sim/` never sees
+    `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
+  - `stepFight` carries `fish` forward by reference because the fish is still
+    static. That stops being safe the moment 1.11 writes to it.
+  - 1.5 needs four numbers that are all in the design.md section 8 open
+    questions: hull HP, line pool size, regeneration rate, fish resistance.
+    **Ask Badr, do not invent them.** Regeneration rate is 1.8's, but the pool
+    size it refills has to be picked now.
+  - Bars are game objects inside the pixel grid, not DOM. The DOM overlay is for
+    debug and tuning text only. See the 2026-08-19 decisions.md entry.
+  - There are 70 units of sky above the waterline and the bars go there.
 - **Noticed but not acted on:**
   - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
     readings still have not been taken**, so the diagnosis has not started.
@@ -74,7 +88,7 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
 - [x] **1.3 Boat movement.** `A`/`D` move a rectangle along the surface. Sim
       module owns the movement, Phaser only draws it.
       _Context: architecture.md sections 1 and 2, design.md section 2._
-- [ ] **1.4 Fish and line.** A static fish rectangle. A line drawn between boat
+- [x] **1.4 Fish and line.** A static fish rectangle. A line drawn between boat
       and fish. Line length computed in `sim/distance.ts`.
       _Context: design.md section 2._
 - [ ] **1.5 Bars.** Hull HP, line/stamina, fish resistance. Drawn plainly.

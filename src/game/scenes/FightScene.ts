@@ -5,12 +5,17 @@ import {
   WATER_LINE_Y,
   BOAT_WIDTH,
   BOAT_HEIGHT,
+  FISH_WIDTH,
+  FISH_HEIGHT,
   COLOUR_WATER,
   COLOUR_SURFACE,
   COLOUR_BOAT,
+  COLOUR_FISH,
+  COLOUR_LINE,
 } from '../../data/config.ts';
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
 import { stepFight } from '../../sim/fight.ts';
+import { lineLength } from '../../sim/distance.ts';
 import { createFightState, noInputs } from '../../sim/state.ts';
 import type { FightInputs, FightState } from '../../sim/state.ts';
 import {
@@ -31,6 +36,8 @@ export class FightScene extends Phaser.Scene {
   private inputs: FightInputs = noInputs();
 
   private boat!: Phaser.GameObjects.Rectangle;
+  private fish!: Phaser.GameObjects.Rectangle;
+  private line!: Phaser.GameObjects.Graphics;
 
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
@@ -57,6 +64,10 @@ export class FightScene extends Phaser.Scene {
       stepFight(state, this.inputs),
     );
 
+    // Added before the boat and fish so it draws underneath both, and the
+    // endpoints disappear into the hull and the body rather than crossing them.
+    this.line = this.add.graphics();
+
     // Sits on the surface rather than in it, so the waterline reads as the
     // thing the boat is floating on. Only x is simulated; y is a render
     // constant, because the boat has one axis.
@@ -66,6 +77,17 @@ export class FightScene extends Phaser.Scene {
       BOAT_WIDTH,
       BOAT_HEIGHT,
       COLOUR_BOAT,
+    );
+
+    // Depth is measured down from the surface, so the waterline is the origin
+    // the simulation's vertical axis is expressed against. This is the only
+    // place that conversion happens.
+    this.fish = this.add.rectangle(
+      initialState.fish.x,
+      WATER_LINE_Y + initialState.fish.depth,
+      FISH_WIDTH,
+      FISH_HEIGHT,
+      COLOUR_FISH,
     );
 
     this.overlay = new DebugOverlay();
@@ -81,7 +103,23 @@ export class FightScene extends Phaser.Scene {
     this.driver.advance(delta);
 
     const { previous, current, alpha } = this.driver;
-    this.boat.x = lerp(previous.boat.x, current.boat.x, alpha);
+
+    const boatX = lerp(previous.boat.x, current.boat.x, alpha);
+    const fishX = lerp(previous.fish.x, current.fish.x, alpha);
+    const fishY =
+      WATER_LINE_Y + lerp(previous.fish.depth, current.fish.depth, alpha);
+
+    this.boat.x = boatX;
+    this.fish.x = fishX;
+    this.fish.y = fishY;
+
+    // Redrawn every frame from the same interpolated values the two rectangles
+    // use, so the line can never sit a frame behind the things it connects.
+    // The boat end is the waterline rather than the hull centre, because the
+    // line goes into the water, not through the boat.
+    this.line.clear();
+    this.line.lineStyle(1, COLOUR_LINE);
+    this.line.lineBetween(boatX, WATER_LINE_Y, fishX, fishY);
 
     this.updateReadout(delta);
   }
@@ -103,6 +141,12 @@ export class FightScene extends Phaser.Scene {
       tickRate,
       targetTickRate: TICK_HZ,
       totalTicks: this.driver.totalTicks,
+      // From the simulation state, not from the interpolated render positions.
+      // The readout is there to show what the fight is actually working with.
+      lineLength: lineLength(
+        this.driver.current.boat,
+        this.driver.current.fish,
+      ),
     });
   }
 }

@@ -51,8 +51,12 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     BOAT_MAX_X,
   );
 
+  // The fish is static until task 1.11, so its state is carried forward by
+  // reference rather than copied. Safe only while nothing writes to it: the
+  // moment the AI lands, this becomes a new object like the boat's.
   return {
     tick: state.tick + 1,
     boat: { x },
+    fish: state.fish,
   };
 }

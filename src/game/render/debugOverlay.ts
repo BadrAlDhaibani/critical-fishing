@@ -24,6 +24,12 @@ export interface DebugFields {
   targetTickRate: number;
   /** Ticks since boot. */
   totalTicks: number;
+  /**
+   * Current boat-to-fish distance in internal units. On screen during the
+   * tuning pass because damage scales off it and the distance bands are cut
+   * out of it, so it needs to be readable while moving.
+   */
+  lineLength: number;
 }
 
 export class DebugOverlay {
@@ -43,6 +49,7 @@ export class DebugOverlay {
       `render ${Math.round(fields.fps)} fps`,
       `sim    ${fields.tickRate.toFixed(1)}/${fields.targetTickRate} ticks/s`,
       `ticks  ${fields.totalTicks}`,
+      `line   ${fields.lineLength.toFixed(1)} u`,
     ].join('\n');
   }
 }

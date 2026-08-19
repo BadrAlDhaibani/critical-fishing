@@ -109,6 +109,15 @@ describe('stepFight: purity', () => {
     expect(start.tick).toBe(0);
   });
 
+  // stepFight builds a fresh state object every tick, so any field it forgets
+  // to carry forward silently disappears one tick into the fight.
+  it('carries the fish forward unchanged', () => {
+    const start = createFightState();
+    const after = hold(start, RIGHT, 300);
+
+    expect(after.fish).toEqual(start.fish);
+  });
+
   it('is deterministic', () => {
     const a = hold(createFightState(), RIGHT, 25);
     const b = hold(createFightState(), RIGHT, 25);

@@ -216,3 +216,33 @@ frame running catch-up ticks applies the same snapshot to all of them, which is
 correct, since keys cannot change part way through a frame.
 
 Rejected: acceleration plus friction, instant-with-stop-slide, 60 u/s, 120 u/s.
+
+## 2026-08-19: Line length is euclidean and includes depth
+
+`hypot(fish.x - boat.x, fish.depth)`, not `abs(fish.x - boat.x)`.
+
+The "one movement axis" entry above says line length is "derived from horizontal
+distance to the fish". This supersedes that wording. The "fish positioning is
+never random" entry argues that depth must drive damage output, "if depth were
+random then damage output would be random", and that only holds if depth is a leg
+of the triangle. Horizontal-only would make a fish rising and diving change
+nothing about damage, which makes the depth half of the fish AI cosmetic and
+throws away the learned window that entry exists to protect.
+
+It also keeps the length off zero directly above the fish, which the
+inverse-distance damage at task 1.7 needs. Being directly above the fish is still
+the shortest line; it is now the depth rather than zero.
+
+Depth is stored as units below the waterline, not as a screen y, so `sim/` has no
+knowledge of where the surface was drawn and the boat is implicitly at depth 0.
+The renderer owns the single conversion, `WATER_LINE_Y + depth`.
+
+Line length is derived on demand and never stored on `FightState`. A cached copy
+is a second source of truth that can go stale by a tick, and recomputing it is
+one `hypot`.
+
+The static fish for task 1.4 sits at x 340, depth 100, so the opening line is
+diagonal and proves both axes of the render at a glance. That is a grey box
+placement rather than a design number; task 1.11 takes both over.
+
+Rejected: horizontal-only distance, caching the length on the state.
