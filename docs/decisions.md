@@ -194,3 +194,25 @@ depth and line length.
 Also confirmed by the same playtest: `WATER_LINE_Y = 70`, giving 70 units of sky
 above the surface and 200 of water below. The sky is not waste. The fish
 breaching needs headroom and the bars go up there at task 1.5.
+
+## 2026-08-19: Boat movement is instant velocity at 90 units/second
+
+Key down is full speed, key up is a dead stop. No acceleration, no momentum, no
+coast.
+
+design.md pillar 3 puts every loss on the player. A boat that coasts turns a
+misread into a fight with the controls, which moves the blame from the player to
+the input handling and is the wrong kind of hard. The weight the fight wants
+comes from the speed value and from what a dash costs, not from input lag.
+
+90 units per second crosses the 480-unit lane in about 5.3 seconds, leaving
+headroom above it for a dash to read as a genuine burst. Confirmed by playtest
+the same day and not adjusted. Expected to move during the 1.13 tuning pass;
+authored per second, with the per-tick value derived from TICK_HZ so the two
+cannot disagree.
+
+Also settled: inputs are sampled once per render frame, not once per tick. A
+frame running catch-up ticks applies the same snapshot to all of them, which is
+correct, since keys cannot change part way through a frame.
+
+Rejected: acceleration plus friction, instant-with-stop-slide, 60 u/s, 120 u/s.

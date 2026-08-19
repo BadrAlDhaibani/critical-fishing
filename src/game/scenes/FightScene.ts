@@ -3,44 +3,34 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
   WATER_LINE_Y,
+  BOAT_WIDTH,
+  BOAT_HEIGHT,
   COLOUR_WATER,
   COLOUR_SURFACE,
+  COLOUR_BOAT,
 } from '../../data/config.ts';
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
+import { stepFight } from '../../sim/fight.ts';
+import { createFightState, noInputs } from '../../sim/state.ts';
+import type { FightInputs, FightState } from '../../sim/state.ts';
+import {
+  createFightControls,
+  readFightInputs,
+  type FightControls,
+} from '../input/keyboard.ts';
 import { DebugOverlay } from '../render/debugOverlay.ts';
 
 /**
- * TEMPORARY, task 1.2 only.
- *
- * There is no fight state yet. This stands in for one so the fixed timestep can
- * be confirmed by eye as well as by test. Task 1.3 replaces all of it with the
- * real boat, and everything marked TEMPORARY below goes with it.
+ * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
+ * number that matters comes out of sim/, and this class only decides where on
+ * the screen to put it.
  */
-interface DebugState {
-  tick: number;
-  x: number;
-}
-
-const DEBUG_SWEEP_TICKS = 180;
-const DEBUG_MARKER_SIZE = 10;
-
-function debugStep(state: DebugState): DebugState {
-  const tick = state.tick + 1;
-  const phase = (tick / DEBUG_SWEEP_TICKS) * Math.PI * 2;
-  return {
-    tick,
-    x: INTERNAL_WIDTH / 2 + Math.sin(phase) * (INTERNAL_WIDTH / 2 - 40),
-  };
-}
-
 export class FightScene extends Phaser.Scene {
-  private driver!: FixedStepDriver<DebugState>;
+  private driver!: FixedStepDriver<FightState>;
+  private controls!: FightControls;
+  private inputs: FightInputs = noInputs();
 
-  // TEMPORARY: the interpolated marker is what the game will actually do. The
-  // snapped one ignores alpha and jumps a whole tick at a time, so the two side
-  // by side show whether interpolation is really running.
-  private smoothMarker!: Phaser.GameObjects.Rectangle;
-  private snappedMarker!: Phaser.GameObjects.Rectangle;
+  private boat!: Phaser.GameObjects.Rectangle;
 
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
@@ -60,35 +50,38 @@ export class FightScene extends Phaser.Scene {
       .rectangle(0, WATER_LINE_Y, INTERNAL_WIDTH, 1, COLOUR_SURFACE)
       .setOrigin(0, 0);
 
-    this.driver = new FixedStepDriver<DebugState>(
-      { tick: 0, x: INTERNAL_WIDTH / 2 },
-      debugStep,
+    this.controls = createFightControls(this);
+
+    const initialState = createFightState();
+    this.driver = new FixedStepDriver<FightState>(initialState, (state) =>
+      stepFight(state, this.inputs),
     );
 
-    this.smoothMarker = this.add.rectangle(
-      INTERNAL_WIDTH / 2,
-      WATER_LINE_Y - 16,
-      DEBUG_MARKER_SIZE,
-      DEBUG_MARKER_SIZE,
-      0xffcc44,
-    );
-    this.snappedMarker = this.add.rectangle(
-      INTERNAL_WIDTH / 2,
-      WATER_LINE_Y - 32,
-      DEBUG_MARKER_SIZE,
-      DEBUG_MARKER_SIZE,
-      0x995533,
+    // Sits on the surface rather than in it, so the waterline reads as the
+    // thing the boat is floating on. Only x is simulated; y is a render
+    // constant, because the boat has one axis.
+    this.boat = this.add.rectangle(
+      initialState.boat.x,
+      WATER_LINE_Y - BOAT_HEIGHT / 2,
+      BOAT_WIDTH,
+      BOAT_HEIGHT,
+      COLOUR_BOAT,
     );
 
     this.overlay = new DebugOverlay();
   }
 
   update(_time: number, delta: number): void {
+    // Sampled once per frame, deliberately. A frame that runs several catch-up
+    // ticks applies this same snapshot to all of them, which is correct: keys
+    // cannot change part way through a frame, so there is nothing finer to
+    // read even if the ticks would accept it.
+    this.inputs = readFightInputs(this.controls);
+
     this.driver.advance(delta);
 
     const { previous, current, alpha } = this.driver;
-    this.smoothMarker.x = lerp(previous.x, current.x, alpha);
-    this.snappedMarker.x = current.x;
+    this.boat.x = lerp(previous.boat.x, current.boat.x, alpha);
 
     this.updateReadout(delta);
   }

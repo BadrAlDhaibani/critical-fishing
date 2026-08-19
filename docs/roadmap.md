@@ -13,23 +13,31 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.2b, plus a follow-up pass for what the playtest
-  found. 1.1, 1.2 and 1.2b were one approved batch, since none is playtestable
-  on its own.
-- **In a half state:** nothing. Tests, lint and build all green.
-- **Open from last playtest:** passed. Interpolation fluid, debug text crisp,
-  water reads right, `WATER_LINE_Y = 70` confirmed. The `sim` readout sitting a
-  little under 60.0 for the first minute is expected: it is a cumulative average
-  and Phaser's boot frame contributes wall time before the first tick, so the
-  deficit decays as 1/t. A number that **falls** over time would mean genuinely
-  dropped ticks and is worth chasing.
+- **Last completed task:** 1.3, boat movement. Tests, lint and build green, and
+  the playtest passed. Both gates closed.
+- **In a half state:** nothing.
+- **Next task:** 1.4, fish and line. 1.2c is still open and still not
+  gameplay-blocking.
+- **Open from last playtest:** 1.3 passed as built. Speed of 90 u/s felt right
+  first try and was not adjusted; expect it to move during 1.13 anyway. The
+  1-then-2 screen-unit stepping from `roundPixels` did not read as judder.
 - **Noticed but not acted on:**
-  - Fullscreen zoom reads `3x` where `4x` is expected. Now task 1.2c.
-  - `FightScene` still holds the TEMPORARY debug markers and `DebugState`; task
-    1.3 deletes them. `game/render/debugOverlay.ts` is permanent, not scaffolding.
-  - architecture.md section 2 does not list `sim/loop.ts`, which now exists.
-    One-line edit proposed, waiting on a yes. Firm tier, do not write it
-    unprompted.
+  - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
+    readings still have not been taken**, so the diagnosis has not started.
+    Cheapest to grab during any future playtest: `devicePixelRatio`,
+    `innerWidth`, `innerHeight` while in F11.
+  - `FixedStepDriver` is not generic over an input type; `FightScene` threads
+    inputs in through a closure and samples them once per frame. Fine now, but
+    the server in phase 7 will likely want `advance(frameMs, inputs)`. Deferred
+    deliberately rather than churn eight call sites in `loop.test.ts`.
+  - architecture.md section 2 does not list `sim/loop.ts`, which now exists, and
+    its `step(state, inputs, dt)` sketch should drop the `dt`, since section 3
+    fixes the timestep and one call is exactly one tick. Two one-line edits
+    proposed, both waiting on a yes. Firm tier, do not write them unprompted.
+  - `npm run format` reformats `docs/design.md` and `CLAUDE.md`, repadding their
+    markdown tables. Whitespace only, but design.md is Locked tier, so the
+    reformat gets reverted by hand each time. A `.prettierignore` covering both
+    would settle it. Not done, since it changes tooling config.
   - Phaser pinned at `^3.90.0`; npm `latest` is 4.2.1. Stack decision not made.
 
 ---
@@ -44,15 +52,15 @@ Coloured rectangles only.
 
 - [x] **1.1 Project init.** Vite + TypeScript + Phaser 3, Vitest, eslint,
       strict mode. Empty scene rendering a blue rectangle for water.
-      *Context: CLAUDE.md, architecture.md sections 2 and 3.*
+      _Context: CLAUDE.md, architecture.md sections 2 and 3._
 - [x] **1.2 Fixed timestep loop.** 60 Hz accumulator, decoupled from render,
       render interpolating between the last two states. Test it.
-      *Context: architecture.md section 3.*
+      _Context: architecture.md section 3._
 - [x] **1.2b Render configuration.** Lock the internal resolution. `pixelArt:
-      true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
+true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
       to fit the window. All simulation units are internal-resolution pixels
       from this point on. Ask Badr for the resolution, do not pick one.
-      *Context: design.md section 6 (Art direction) and section 8.*
+      _Context: design.md section 6 (Art direction) and section 8._
 - [ ] **1.2c Confirm integer zoom at fullscreen.** The readout showed `@ 3x` in
       F11 fullscreen on a display Badr reports as 100% scaled, where 1920x1080
       should give `4x`. Diagnose before fixing: run `devicePixelRatio`,
@@ -62,33 +70,33 @@ Coloured rectangles only.
       firing mid-transition with nothing recomputing once the window settles. If
       `innerHeight` is under 1080 the behaviour is already correct and this task
       just closes. Not gameplay-blocking, 1.3 can go first.
-      *Context: design.md section 6 (Art direction).*
-- [ ] **1.3 Boat movement.** `A`/`D` move a rectangle along the surface. Sim
+      _Context: design.md section 6 (Art direction)._
+- [x] **1.3 Boat movement.** `A`/`D` move a rectangle along the surface. Sim
       module owns the movement, Phaser only draws it.
-      *Context: architecture.md sections 1 and 2, design.md section 2.*
+      _Context: architecture.md sections 1 and 2, design.md section 2._
 - [ ] **1.4 Fish and line.** A static fish rectangle. A line drawn between boat
       and fish. Line length computed in `sim/distance.ts`.
-      *Context: design.md section 2.*
+      _Context: design.md section 2._
 - [ ] **1.5 Bars.** Hull HP, line/stamina, fish resistance. Drawn plainly.
-      *Context: design.md section 2.*
+      _Context: design.md section 2._
 - [ ] **1.6 Dash.** `Shift` + direction, costs line.
-      *Context: design.md section 2. Ask for the values.*
+      _Context: design.md section 2. Ask for the values._
 - [ ] **1.7 Basic attack.** Costs line, damages resistance, damage scales
       inversely with line length.
-      *Context: design.md section 2, architecture.md section 4.*
+      _Context: design.md section 2, architecture.md section 4._
 - [ ] **1.8 Stamina regeneration.** Line pool refills over time.
-      *Context: design.md section 2.*
+      _Context: design.md section 2._
 - [ ] **1.9 Fish attack: close punisher.** Wind-up, active, recovery. Commits
       once started. Damages hull.
-      *Context: design.md section 3.*
+      _Context: design.md section 3._
 - [ ] **1.10 Fish attack: far punisher.** Slow tracking volley.
-      *Context: design.md section 3.*
+      _Context: design.md section 3._
 - [ ] **1.11 Distance bands.** Two bands with hysteresis, fish selects attacks
       by band and repositions with intent.
-      *Context: design.md section 3, architecture.md section 4.*
+      _Context: design.md section 3, architecture.md section 4._
 - [ ] **1.12 Win and lose states.** Hull to zero loses. Resistance to zero wins
       and enters a stub reel-in sequence.
-      *Context: design.md section 2.*
+      _Context: design.md section 2._
 - [ ] **1.13 Tuning pass.** Badr plays it twenty times. Adjust numbers only.
 
 **Phase 1 exit test:** play twenty losses in a row and watch your own reaction.
@@ -109,7 +117,7 @@ honestly how much of the feel comes from mechanics.
 - [ ] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss.
 - [ ] **2.5 Feel tuning pass.**
 
-*Context for all of phase 2: design.md section 6.*
+_Context for all of phase 2: design.md section 6._
 
 ---
 
@@ -123,7 +131,7 @@ honestly how much of the feel comes from mechanics.
       edits, stop: the template is wrong and it is cheapest to fix now.
 - [ ] **3.4 Heavy attack.** Second player attack, higher cost and damage.
 
-*Context: architecture.md section 4, design.md sections 2 and 3.*
+_Context: architecture.md section 4, design.md sections 2 and 3._
 
 ---
 
@@ -143,7 +151,7 @@ on the fight is worth more than anything in phases 5 to 7.
 - [ ] **4.7 Pre-cast modifiers.** Bait and spot shift the encounter table.
 - [ ] **4.8 Deploy to a static host, send the link to friends.**
 
-*Context: design.md section 5, architecture.md section 6.*
+_Context: design.md section 5, architecture.md section 6._
 
 ---
 
@@ -153,7 +161,7 @@ on the fight is worth more than anything in phases 5 to 7.
 - [ ] **5.2 REST API.**
 - [ ] **5.3 Swap the storage interface to the API.**
 
-*Context: architecture.md section 6.*
+_Context: architecture.md section 6._
 
 ---
 
@@ -163,7 +171,7 @@ on the fight is worth more than anything in phases 5 to 7.
 - [ ] **6.2 Bot posting catches to the channel.**
 - [ ] **6.3 Leaderboard command.**
 
-*Context: architecture.md section 7.*
+_Context: architecture.md section 7._
 
 ---
 
@@ -181,7 +189,7 @@ The largest phase and the one with the most work that is not design.
 - [ ] **7.8 First boss fish, with a phase transition at 50%.**
 - [ ] **7.9 Stun lure gear, with visible payoff for the team.**
 
-*Context: design.md section 4, architecture.md section 5.*
+_Context: design.md section 4, architecture.md section 5._
 
 ---
 
@@ -197,7 +205,7 @@ Never before phase 2.
 - [ ] **8.5 Layered stem boss music.**
 - [ ] **8.6 The silence beat on breach.**
 
-*Context: design.md section 6.*
+_Context: design.md section 6._
 
 ---
 

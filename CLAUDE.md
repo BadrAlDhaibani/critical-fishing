@@ -47,6 +47,35 @@ This is the most important section in this file.
 - If a task turns out to be bigger than it looked, stop and say so rather than
   expanding scope silently.
 
+## Batches and conversations
+
+A **batch** is one roadmap task, ending in a playtest. A **conversation** can
+hold several batches. Do not confuse the two: stopping to wait for a playtest
+does not mean the session has to end.
+
+**As the last line of every batch report, say whether to keep going here or
+start a new conversation, and why.** Do not wait to be asked. Badr cannot see
+how much context is left or which docs you have read, so this call is yours to
+make and his to overrule.
+
+Say **start a new one** when any of these is true:
+
+- The next task is in a different phase. Always, no judgement needed.
+- The next task's *Context* line points at docs this conversation has not read.
+- Three or four batches have already been done here.
+- This conversation has been summarised or compacted. Restart from the docs,
+  which are curated deliberately, rather than from a summary, which is not.
+
+Say **stay here** when the next task shares a *Context* line with the one just
+finished and is a small variation on the same code. 1.5 after 1.4 is the shape
+of it: same design.md section, same "draw sim state" problem, nothing to
+re-read.
+
+When a new conversation is the call, reread the handoff block before ending and
+make sure it is genuinely enough to restart from. It is the only thing that
+survives. Anything you know only because you did the work is about to be lost,
+so it belongs in `roadmap.md` or `decisions.md` now, not in the report.
+
 ## Code conventions
 
 - TypeScript strict mode. No `any`.
