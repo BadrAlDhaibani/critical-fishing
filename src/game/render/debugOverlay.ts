@@ -22,8 +22,22 @@ export interface DebugFields {
   tickRate: number;
   /** Target rate, for comparison against the measured one. */
   targetTickRate: number;
-  /** Ticks since boot. */
+  /**
+   * Ticks since boot. Worth knowing while playtesting: if this drops back to
+   * zero the page reloaded and the fight restarted, which looks exactly like
+   * the bars refilling themselves.
+   */
   totalTicks: number;
+  /** Hull HP, current and full. */
+  hull: number;
+  hullMax: number;
+  /**
+   * The stamina pool, current and full. As a number rather than only as a bar,
+   * because task 1.7 prices an attack against it and 1.8 tunes a refill rate
+   * into it, and neither is judgeable from a proportion.
+   */
+  stamina: number;
+  staminaMax: number;
   /**
    * Current boat-to-fish distance in internal units. On screen during the
    * tuning pass because damage scales off it and the distance bands are cut
@@ -44,12 +58,17 @@ export class DebugOverlay {
   }
 
   update(fields: DebugFields): void {
+    // "tether" rather than "line" for the distance, now that the stamina pool
+    // is also on screen. design.md calls both of them the line, which is
+    // exactly why two numbers here cannot share the word.
     this.element.textContent = [
       `${fields.resolution} @ ${fields.zoom}x`,
       `render ${Math.round(fields.fps)} fps`,
       `sim    ${fields.tickRate.toFixed(1)}/${fields.targetTickRate} ticks/s`,
       `ticks  ${fields.totalTicks}`,
-      `line   ${fields.lineLength.toFixed(1)} u`,
+      `hull   ${fields.hull}/${fields.hullMax}`,
+      `stam   ${fields.stamina}/${fields.staminaMax}`,
+      `tether ${fields.lineLength.toFixed(1)} u`,
     ].join('\n');
   }
 }

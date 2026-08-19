@@ -178,6 +178,8 @@ export class FightScene extends Phaser.Scene {
     const seconds = this.elapsedMs / 1000;
     const tickRate = seconds > 0 ? this.driver.totalTicks / seconds : 0;
 
+    const { boat, fish } = this.driver.current;
+
     this.overlay.update({
       resolution: `${INTERNAL_WIDTH}x${INTERNAL_HEIGHT}`,
       zoom: this.scale.zoom,
@@ -185,12 +187,13 @@ export class FightScene extends Phaser.Scene {
       tickRate,
       targetTickRate: TICK_HZ,
       totalTicks: this.driver.totalTicks,
+      hull: boat.hull,
+      hullMax: boat.hullMax,
+      stamina: boat.line,
+      staminaMax: boat.lineMax,
       // From the simulation state, not from the interpolated render positions.
       // The readout is there to show what the fight is actually working with.
-      lineLength: lineLength(
-        this.driver.current.boat,
-        this.driver.current.fish,
-      ),
+      lineLength: lineLength(boat, fish),
     });
   }
 }

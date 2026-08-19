@@ -13,39 +13,54 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.4, fish and line. Both gates closed.
-- **In a half state:** 1.5, bars. Tests, lint and build are green. **The
-  playtest gate has not closed**, so the task is not done.
-- **Next task:** 1.6, dash, once 1.5 is confirmed. 1.2c is still open and still
-  not gameplay-blocking.
-- **Values settled this session.** These answer part of design.md section 8 and
-  must not be re-invented. The decisions.md entry recording them is written up
-  in the batch report and is **still to be appended**:
-  - Default boat hull: 100. Default line stamina pool: 80. Grey box fish
-    resistance: 400.
-  - Hull HP and stamina pool are properties of the **boat and line the player
-    has unlocked**, Dark Souls style, not game constants. Later boats run 140,
-    200, 1000; a bigger pool is what makes later expensive attacks affordable,
-    so a newbie line cannot fire a heavy attack without draining the bar. This
-    is why the maxima live on `FightState` and `data/config.ts` holds only the
-    default loadout, read in exactly one place, `createFightState`.
-  - Stamina sits below hull deliberately. Badr asked for the two not to be
-    "matchy matchy" and left the figure to me. A test asserts the inequality.
-  - Bar layout, picked from a mockup: hull and line stacked top left, fish
-    resistance top right.
-- **Carried out of 1.5, needed before 1.6:**
-  - Nothing spends or refills anything yet. 1.6 charges the dash against
-    `boat.line`, 1.7 the attack, 1.8 refills it, 1.9 damages `boat.hull`. All
-    of those costs are still open questions in design.md section 8: **ask.**
+- **Last completed task:** 1.6, dash. Both gates closed; it played "nicely" as
+  built and nothing was retuned. See the two 2026-08-19 decisions.md entries.
+- **In a half state:** nothing.
+- **Next task:** 1.7, basic attack. 1.2c is still open and still not
+  gameplay-blocking.
+- **Open from last playtest:** the stamina looked like it was regenerating. It
+  was not: the page had reloaded. See the decisions.md entry, and check `ticks`
+  in the readout before believing it if it happens again.
+- **Numbers settled so far.** All of these answer parts of design.md section 8
+  and must not be re-invented or quietly retuned outside task 1.13:
+  - Default boat hull 100, default line stamina pool 80, grey box fish
+    resistance 400. Hull and pool are properties of the **boat and line the
+    player has unlocked**, not game constants, which is why the maxima live on
+    `FightState` and `data/config.ts` holds only the default loadout.
+  - Dash: 55 units over 14 ticks, costing 16. Five dashes from a full pool.
+  - Still open and needed at 1.7: basic attack stamina cost, its damage, and
+    the damage-by-distance curve. **Ask, do not invent.** Price the cost against
+    the 80 pool and against the dash's 16, since the two share it.
+- **Carried out of 1.6, needed before 1.7:**
+  - The debug readout now shows `hull` and `stam` as `current/max`, and the
+    tether's length is labelled `tether` rather than `line`. Fish resistance is
+    deliberately not there yet; 1.7 is the task that should add it, once
+    something moves it.
+  - A test asserts the stamina pool **never rises** under any input combination.
+    **Task 1.8 is expected to change that test deliberately.** Before then, a
+    failure is a real regression.
+  - The dash is **committed**: direction locks at the press, steering and
+    reversal are ignored for all 14 ticks, and no second dash can start until
+    it ends. This mirrors the fish's non-cancellable wind-up in design.md
+    section 3, and a test asserts it. Do not "improve" it into steerable.
+  - It is **edge-triggered inside `sim/`**, not in the input layer.
+    `FightInputs.dash` is the raw held state and `boat.dashHeld` carries the
+    previous tick, so holding shift cannot chain dashes. Done this way because
+    a phase 7 server cannot trust a client's "pressed this frame".
+  - A dash that cannot be paid for **in full** does not fire at all, and one
+    eaten by a wall is still charged. Both deliberate, both tested.
+  - **No invulnerability frames.** design.md section 8 lists them as an open
+    question and it was left open on purpose: there is nothing to be
+    invulnerable to until the fish attacks at 1.9, so it is 1.9's call to make
+    with something on screen to judge it against.
   - `stepFight` rebuilds `boat` from scratch every tick, so every new field has
-    to be named there or it vanishes after one tick. Guarded by a test now.
+    to be named there or it vanishes after one tick. Guarded by a test.
   - `fish` is still carried forward by reference. Stops being safe at 1.11.
   - Bars are game objects inside the pixel grid, not DOM. `game/render/bars.ts`
     draws them; the pure fill maths is in `game/render/barGeometry.ts` so it can
     be tested without Phaser. Any value above zero draws at least 1 unit, so a
-    living boat never shows an empty bar.
-  - The DOM debug readout moved from the top left to the bottom left of the
-    window, because at 4x it sat directly on top of the new bars.
+    living boat never shows an empty bar. The DOM debug readout sits bottom left
+    because at 4x the top left is now the hull and line bars.
   - `tests/distance.test.ts` builds its boats and fish by spreading a real
     `createFightState()`, so growing the state does not break it again.
   - Line length is euclidean and includes depth, and lives in `sim/distance.ts`
@@ -112,9 +127,9 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
 - [x] **1.4 Fish and line.** A static fish rectangle. A line drawn between boat
       and fish. Line length computed in `sim/distance.ts`.
       _Context: design.md section 2._
-- [ ] **1.5 Bars.** Hull HP, line/stamina, fish resistance. Drawn plainly.
+- [x] **1.5 Bars.** Hull HP, line/stamina, fish resistance. Drawn plainly.
       _Context: design.md section 2._
-- [ ] **1.6 Dash.** `Shift` + direction, costs line.
+- [x] **1.6 Dash.** `Shift` + direction, costs line.
       _Context: design.md section 2. Ask for the values._
 - [ ] **1.7 Basic attack.** Costs line, damages resistance, damage scales
       inversely with line length.

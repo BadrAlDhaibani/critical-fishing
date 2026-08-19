@@ -69,6 +69,36 @@ export const COLOUR_BAR_RESISTANCE = 0xbf4f4f;
 export const BOAT_SPEED_PER_SECOND = 90;
 export const BOAT_SPEED_PER_TICK = BOAT_SPEED_PER_SECOND / TICK_HZ;
 
+/**
+ * The dash. Chosen 2026-08-19, see decisions.md.
+ *
+ * design.md section 2 calls it the panic button and the reason you cannot dodge
+ * everything, so the shape that matters is: fast enough to beat a telegraph,
+ * short enough to commit to, expensive enough that spending it is a decision.
+ *
+ * 55 units over 14 ticks is roughly 236 units per second, about 2.6x walking.
+ * It clears the boat's own width and a bit, which is the distance an attack
+ * telegraph has to be dodged by, and it shifts line length far enough that the
+ * damage traded away is felt rather than theoretical.
+ *
+ * Authored as distance and duration because that is how a dash is judged while
+ * playing. The per-tick speed is derived, so the two cannot disagree and the
+ * total travelled is exactly DASH_DISTANCE.
+ */
+export const DASH_DISTANCE = 55;
+export const DASH_DURATION_TICKS = 14;
+export const DASH_SPEED_PER_TICK = DASH_DISTANCE / DASH_DURATION_TICKS;
+
+/**
+ * What one dash takes out of the pool. Five dashes from a full default line.
+ *
+ * Deliberately leaves room underneath it for the basic attack at task 1.7, so
+ * that panicking twice still leaves something to fight with. Which of dashing
+ * and attacking is the expensive habit is set here, and it is the number most
+ * likely to move at the 1.13 tuning pass.
+ */
+export const DASH_LINE_COST = 16;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;

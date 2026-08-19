@@ -11,13 +11,15 @@ import Phaser from 'phaser';
 import type { FightInputs } from '../../sim/state.ts';
 
 /**
- * The keys a fight listens to. design.md section 2 lists exactly two: A and D.
- * The control scheme is deliberately this small, so extra bindings are a design
- * proposal rather than a convenience to add in passing.
+ * The keys a fight listens to. design.md section 2 lists A, D, shift plus a
+ * direction, and the attack inputs still to come. The control scheme is
+ * deliberately this small, so extra bindings are a design proposal rather than
+ * a convenience to add in passing.
  */
 export interface FightControls {
   left: Phaser.Input.Keyboard.Key;
   right: Phaser.Input.Keyboard.Key;
+  dash: Phaser.Input.Keyboard.Key;
 }
 
 export function createFightControls(scene: Phaser.Scene): FightControls {
@@ -33,13 +35,24 @@ export function createFightControls(scene: Phaser.Scene): FightControls {
   return {
     left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
     right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+    // Either shift, since which hand is on it depends on how the player holds
+    // A and D. Phaser reports both under the one SHIFT key code.
+    dash: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT),
   };
 }
 
-/** Snapshot the keys as a plain object the simulation can consume. */
+/**
+ * Snapshot the keys as a plain object the simulation can consume.
+ *
+ * Held state only, including the dash. Nothing here tries to spot the frame a
+ * key went down: the simulation works that out from the previous tick, so the
+ * edge is decided at 60 Hz rather than at whatever rate the monitor happens to
+ * run, and a phase 7 server can do the same without trusting the client.
+ */
 export function readFightInputs(controls: FightControls): FightInputs {
   return {
     moveLeft: controls.left.isDown,
     moveRight: controls.right.isDown,
+    dash: controls.dash.isDown,
   };
 }

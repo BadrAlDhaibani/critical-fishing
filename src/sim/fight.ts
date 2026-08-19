@@ -15,6 +15,9 @@
 import {
   BOAT_SPEED_PER_TICK,
   BOAT_WIDTH,
+  DASH_DURATION_TICKS,
+  DASH_LINE_COST,
+  DASH_SPEED_PER_TICK,
   INTERNAL_WIDTH,
 } from '../data/config.ts';
 import type { FightInputs, FightState } from './state.ts';
@@ -45,16 +48,56 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // movement reads as the game ignoring an input.
   const direction = (inputs.moveRight ? 1 : 0) - (inputs.moveLeft ? 1 : 0);
 
-  const x = clamp(
-    state.boat.x + direction * BOAT_SPEED_PER_TICK,
-    BOAT_MIN_X,
-    BOAT_MAX_X,
-  );
+  let { line, dashDirection, dashTicksRemaining } = state.boat;
+
+  // A fresh press, not the key being held. Holding shift would otherwise empty
+  // the pool into five back-to-back dashes without another decision being made.
+  const dashPressed = inputs.dash && !state.boat.dashHeld;
+
+  // Every condition here is a refusal to start, and all of them are silent. A
+  // dash that fired at half price or in no particular direction would be worse
+  // than one that does not fire: the pool is the only thing limiting the panic
+  // button, so it cannot be part-charged.
+  if (
+    dashTicksRemaining === 0 &&
+    dashPressed &&
+    direction !== 0 &&
+    line >= DASH_LINE_COST
+  ) {
+    line -= DASH_LINE_COST;
+    dashDirection = direction;
+    dashTicksRemaining = DASH_DURATION_TICKS;
+  }
+
+  let x: number;
+
+  if (dashTicksRemaining > 0) {
+    // Steering input is ignored for the whole dash, including a reversal. This
+    // is the commitment: the cost is paid up front and the distance is not
+    // negotiable afterwards. Walls still clamp, and a dash into one is spent
+    // rather than refunded, because the input was made.
+    x = clamp(
+      state.boat.x + dashDirection * DASH_SPEED_PER_TICK,
+      BOAT_MIN_X,
+      BOAT_MAX_X,
+    );
+
+    dashTicksRemaining -= 1;
+    if (dashTicksRemaining === 0) {
+      dashDirection = 0;
+    }
+  } else {
+    x = clamp(
+      state.boat.x + direction * BOAT_SPEED_PER_TICK,
+      BOAT_MIN_X,
+      BOAT_MAX_X,
+    );
+  }
 
   // The boat object is rebuilt from scratch every tick, so every field has to
   // be named here or it silently disappears one tick into the fight. Nothing
-  // spends hull or line yet: 1.6 charges the dash, 1.7 the attack, 1.8 refills
-  // the pool and 1.9 damages the hull.
+  // spends hull yet: 1.7 charges the attack, 1.8 refills the pool and 1.9
+  // damages the hull.
   //
   // The fish is static until task 1.11, so its state is carried forward by
   // reference rather than copied. Safe only while nothing writes to it: the
@@ -65,8 +108,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       x,
       hull: state.boat.hull,
       hullMax: state.boat.hullMax,
-      line: state.boat.line,
+      line,
       lineMax: state.boat.lineMax,
+      dashTicksRemaining,
+      dashDirection,
+      dashHeld: inputs.dash,
     },
     fish: state.fish,
   };

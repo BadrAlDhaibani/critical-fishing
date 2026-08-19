@@ -246,3 +246,84 @@ diagonal and proves both axes of the render at a glance. That is a grey box
 placement rather than a design number; task 1.11 takes both over.
 
 Rejected: horizontal-only distance, caching the length on the state.
+
+## 2026-08-19: Bar values are gear, not constants
+
+Default boat hull 100, default line stamina pool 80, grey box fish resistance 400. Part of the design.md section 8 open questions, answered.
+
+Hull HP and the stamina pool are properties of the boat and line the player has
+unlocked, Dark Souls style, rather than fixed numbers. Later boats run 140, 200, 1000. A bigger pool is what makes the expensive attacks unlocked later
+affordable, so a newbie line cannot fire a heavy attack without draining the
+whole bar, and upgrading the line is what unlocks using them properly.
+
+This is why the maxima live on `FightState` (`hullMax`, `lineMax`,
+`resistanceMax`) rather than as constants imported wherever they are needed.
+`data/config.ts` holds the default loadout only and is read in one place,
+`createFightState`. Phase 4.5 gear and phase 7 per-player boats seed different
+numbers and touch nothing else.
+
+Stamina sits below hull deliberately. Badr asked for the two not to be matchy
+matchy and left the figure to me; two bars on the same number read as one value
+shown twice, and they have to be told apart at a glance while being hit. 80 also
+divides cleanly into the dash and attack costs 1.6 and 1.7 price against it. A
+test asserts the inequality so it cannot drift back.
+
+Bar layout picked from a mockup: hull and line stacked top left, fish resistance
+top right. The DOM debug readout moved to the bottom left as a consequence,
+since it sat on top of them at 4x.
+
+Rejected: hull and line both on 100, global `HULL_MAX`/`LINE_MAX` constants, 200
+and 800 resistance.
+
+## 2026-08-19: The dash is 55 units over 14 ticks for 16 stamina, and it commits
+
+Roughly 236 units per second against 90 walking, about 2.6x. It clears the
+boat's own width and a bit, which is the distance a telegraph has to be dodged
+by, and it shifts line length far enough that the damage traded away is felt
+rather than theoretical. Five dashes from a full default pool, deliberately
+leaving room underneath for the basic attack at task 1.7.
+
+Direction locks at the press and is not read again. Steering and reversal are
+ignored for all 14 ticks and no second dash can start until the first ends. A
+steerable dash is a strictly better walk, and design.md section 3 forbids the
+fish cancelling a wind-up for the same reason: commitment is what makes a read
+worth making. A dash that cannot be paid for in full does not fire at all, and
+one eaten by a wall is still charged, because the input was made.
+
+Edge-triggered inside `sim/` from `boat.dashHeld` rather than in the input
+layer, so holding shift cannot chain dashes. Done this way because a phase 7
+server cannot trust a client's claim that a key went down this frame, but it can
+hold the previous tick's raw held state and work the edge out itself. The edge
+is then decided at 60 Hz rather than at whatever rate the monitor runs.
+
+Invulnerability frames deliberately still open. design.md section 8 lists them
+and there is nothing to be invulnerable to until the fish attacks at 1.9, so it
+is 1.9's decision, made with something on screen to judge it against.
+
+Rejected: 40 units over 10 ticks, 75 over 18, costs of 10 and 20, a steerable
+dash, edge detection in the input layer.
+
+## 2026-08-19: A bar refilling during a playtest means the page reloaded
+
+Recorded because it cost a diagnosis and will otherwise cost another one.
+
+The 1.6 playtest reported the stamina regenerating, which nothing before task
+1.8 does. `sim/fight.ts` has exactly two writes to `line`, a subtraction and a
+carry-forward, and nothing in `sim/loop.ts`, `main.ts` or `game/config.ts`
+restarts a scene, so the simulation could not have done it. The `ticks` counter
+in the debug readout settled it by resetting to zero: the page had reloaded.
+
+Vite is running all through a session and a Phaser game has no HMR handler, so
+every source edit forces a full page reload, and a reload is a fresh
+`createFightState` at full everything. This is correct behaviour and is not
+worth suppressing. `ticks` dropping back to zero is the tell.
+
+Two things came out of it. The readout now shows `hull` and `stam` as numbers,
+because the question could not be answered by looking at the screen while the
+bars only showed proportions, and 1.7 and 1.8 both need the real figures while
+playing. And a test now asserts the pool never rises under any combination of
+inputs, so the question cannot be reopened by accident. **Task 1.8 is expected
+to change that test deliberately.**
+
+Also renamed in the readout: the tether's length is now labelled `tether`, since
+`stam` sits next to it and design.md calls both of them the line.

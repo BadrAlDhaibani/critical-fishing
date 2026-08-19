@@ -44,6 +44,30 @@ export interface BoatState {
   line: number;
   /** Full stamina pool. A property of the line equipped, same as `hullMax`. */
   lineMax: number;
+  /**
+   * Ticks left in the dash currently under way, or 0 when not dashing.
+   *
+   * A dash is committed once started, the same way design.md section 3 commits
+   * the fish to a wind-up. A dash that could be steered or cancelled mid-flight
+   * would be a strictly better walk, and the panic button is supposed to be a
+   * decision with a wrong answer.
+   */
+  dashTicksRemaining: number;
+  /**
+   * Which way that dash is going: -1 left, 1 right, 0 when not dashing. Locked
+   * at the moment of the input and not read from the keys again.
+   */
+  dashDirection: number;
+  /**
+   * Whether the dash key was held on the previous tick, so that a dash needs a
+   * fresh press rather than repeating while the key is down.
+   *
+   * The edge is detected here rather than in the input layer on purpose. In
+   * phase 7 the server cannot trust a client to send an honest "pressed this
+   * frame", but it can hold the previous tick's raw held state itself and work
+   * the edge out. The same code then runs on both sides.
+   */
+  dashHeld: boolean;
 }
 
 export interface FishState {
@@ -85,6 +109,13 @@ export interface FightState {
 export interface FightInputs {
   moveLeft: boolean;
   moveRight: boolean;
+  /**
+   * Whether the dash key is held right now, not whether it was pressed this
+   * tick. The simulation works the press edge out itself from `boat.dashHeld`,
+   * so this stays a plain snapshot of the hardware and a network client cannot
+   * manufacture presses.
+   */
+  dash: boolean;
 }
 
 /**
@@ -104,6 +135,9 @@ export function createFightState(): FightState {
       hullMax: DEFAULT_HULL_MAX,
       line: DEFAULT_LINE_MAX,
       lineMax: DEFAULT_LINE_MAX,
+      dashTicksRemaining: 0,
+      dashDirection: 0,
+      dashHeld: false,
     },
     fish: {
       x: FISH_START_X,
@@ -116,5 +150,5 @@ export function createFightState(): FightState {
 
 /** No input at all. Useful as a starting value and in tests. */
 export function noInputs(): FightInputs {
-  return { moveLeft: false, moveRight: false };
+  return { moveLeft: false, moveRight: false, dash: false };
 }

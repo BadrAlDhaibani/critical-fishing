@@ -6,15 +6,22 @@ import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
 import {
   BOAT_SPEED_PER_TICK,
   BOAT_WIDTH,
+  DASH_DISTANCE,
+  DASH_DURATION_TICKS,
+  DASH_LINE_COST,
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
   FISH_RESISTANCE_MAX,
   INTERNAL_WIDTH,
 } from '../src/data/config.ts';
 
-const LEFT: FightInputs = { moveLeft: true, moveRight: false };
-const RIGHT: FightInputs = { moveLeft: false, moveRight: true };
-const BOTH: FightInputs = { moveLeft: true, moveRight: true };
+const LEFT: FightInputs = { moveLeft: true, moveRight: false, dash: false };
+const RIGHT: FightInputs = { moveLeft: false, moveRight: true, dash: false };
+const BOTH: FightInputs = { moveLeft: true, moveRight: true, dash: false };
+
+const DASH_RIGHT: FightInputs = { ...RIGHT, dash: true };
+const DASH_LEFT: FightInputs = { ...LEFT, dash: true };
+const DASH_NEUTRAL: FightInputs = { ...noInputs(), dash: true };
 
 /** Run n ticks of one held input. */
 function hold(state: FightState, inputs: FightInputs, n: number): FightState {
@@ -121,6 +128,221 @@ describe('stepFight: walls', () => {
     const released = stepFight(pinned, RIGHT);
 
     expect(released.boat.x).toBeCloseTo(BOAT_MIN_X + BOAT_SPEED_PER_TICK, 10);
+  });
+});
+
+describe('stepFight: dash', () => {
+  it('covers exactly the dash distance over the dash duration', () => {
+    const start = createFightState();
+    // The dash key is up at tick zero, so the first tick is already a press.
+    const after = hold(start, DASH_RIGHT, DASH_DURATION_TICKS);
+
+    expect(after.boat.x - start.boat.x).toBeCloseTo(DASH_DISTANCE, 8);
+  });
+
+  it('goes left when dashed left', () => {
+    const start = createFightState();
+    const after = hold(start, DASH_LEFT, DASH_DURATION_TICKS);
+
+    expect(start.boat.x - after.boat.x).toBeCloseTo(DASH_DISTANCE, 8);
+  });
+
+  it('outruns walking over the same ticks', () => {
+    const start = createFightState();
+    const dashed = hold(start, DASH_RIGHT, DASH_DURATION_TICKS);
+    const walked = hold(start, RIGHT, DASH_DURATION_TICKS);
+
+    expect(dashed.boat.x).toBeGreaterThan(walked.boat.x);
+  });
+
+  it('costs the pool once, not once per tick', () => {
+    const start = createFightState();
+    const after = hold(start, DASH_RIGHT, DASH_DURATION_TICKS);
+
+    expect(after.boat.line).toBe(start.boat.line - DASH_LINE_COST);
+  });
+
+  it('charges at the moment of the press', () => {
+    const after = stepFight(createFightState(), DASH_RIGHT);
+
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
+    expect(after.boat.dashTicksRemaining).toBe(DASH_DURATION_TICKS - 1);
+  });
+
+  it('ends cleanly and hands control back to walking', () => {
+    const start = createFightState();
+    const finished = hold(start, DASH_RIGHT, DASH_DURATION_TICKS);
+
+    expect(finished.boat.dashTicksRemaining).toBe(0);
+    expect(finished.boat.dashDirection).toBe(0);
+
+    // Releasing the key and walking on, one ordinary tick of speed.
+    const walking = stepFight(finished, RIGHT);
+    expect(walking.boat.x - finished.boat.x).toBeCloseTo(
+      BOAT_SPEED_PER_TICK,
+      10,
+    );
+  });
+
+  // The commitment. design.md section 3 will not let the fish cancel a wind-up,
+  // and the panic button does not get to be a strictly better walk either.
+  it('ignores steering for the whole dash, including a reversal', () => {
+    const start = createFightState();
+    const committed = stepFight(start, DASH_RIGHT);
+
+    // Turn hard the other way, mid-flight, dash key released.
+    let state = committed;
+    for (let i = 0; i < DASH_DURATION_TICKS - 1; i++) {
+      state = stepFight(state, LEFT);
+    }
+
+    expect(state.boat.x - start.boat.x).toBeCloseTo(DASH_DISTANCE, 8);
+  });
+
+  it('does nothing without a direction', () => {
+    const start = createFightState();
+    const after = stepFight(start, DASH_NEUTRAL);
+
+    expect(after.boat.x).toBe(start.boat.x);
+    expect(after.boat.line).toBe(start.boat.line);
+    expect(after.boat.dashTicksRemaining).toBe(0);
+  });
+
+  it('does nothing with both directions held', () => {
+    const start = createFightState();
+    const after = stepFight(start, { ...BOTH, dash: true });
+
+    expect(after.boat.x).toBe(start.boat.x);
+    expect(after.boat.line).toBe(start.boat.line);
+  });
+
+  it('refuses to start on a pool that cannot pay in full', () => {
+    const start = createFightState();
+    const broke: FightState = {
+      ...start,
+      boat: { ...start.boat, line: DASH_LINE_COST - 1 },
+    };
+    const after = stepFight(broke, DASH_RIGHT);
+
+    // Still walks. It is a refusal to dash, not a refusal to move.
+    expect(after.boat.line).toBe(DASH_LINE_COST - 1);
+    expect(after.boat.dashTicksRemaining).toBe(0);
+    expect(after.boat.x - broke.boat.x).toBeCloseTo(BOAT_SPEED_PER_TICK, 10);
+  });
+
+  it('starts on a pool holding exactly the cost', () => {
+    const start = createFightState();
+    const exact: FightState = {
+      ...start,
+      boat: { ...start.boat, line: DASH_LINE_COST },
+    };
+    const after = stepFight(exact, DASH_RIGHT);
+
+    expect(after.boat.line).toBe(0);
+    expect(after.boat.dashTicksRemaining).toBe(DASH_DURATION_TICKS - 1);
+  });
+
+  // Holding shift would otherwise empty the whole pool without a second
+  // decision being made.
+  it('does not chain while the key stays held', () => {
+    const start = createFightState();
+    const after = hold(start, DASH_RIGHT, DASH_DURATION_TICKS * 4);
+
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
+  });
+
+  it('dashes again once the key is released and pressed afresh', () => {
+    const start = createFightState();
+    const first = hold(start, DASH_RIGHT, DASH_DURATION_TICKS);
+    const released = stepFight(first, noInputs());
+    const second = stepFight(released, DASH_RIGHT);
+
+    expect(second.boat.line).toBe(DEFAULT_LINE_MAX - 2 * DASH_LINE_COST);
+  });
+
+  it('cannot start a second dash during the first', () => {
+    const start = createFightState();
+    let state = stepFight(start, DASH_RIGHT);
+
+    // Release and press again mid-dash. The dash under way owns the boat.
+    state = stepFight(state, RIGHT);
+    state = stepFight(state, DASH_LEFT);
+
+    expect(state.boat.line).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
+    expect(state.boat.dashDirection).toBe(1);
+  });
+
+  it('spends the pool even when the dash is eaten by a wall', () => {
+    const pinned = hold(createFightState(), RIGHT, 1000);
+    const after = hold(pinned, DASH_RIGHT, DASH_DURATION_TICKS);
+
+    expect(after.boat.x).toBe(BOAT_MAX_X);
+    expect(after.boat.line).toBe(pinned.boat.line - DASH_LINE_COST);
+  });
+
+  it('runs the pool down over five dashes and then refuses', () => {
+    let state = createFightState();
+
+    // Five is what the default pool buys. Each dash is the full duration plus
+    // one released tick so the next press registers as an edge.
+    for (let i = 0; i < 5; i++) {
+      state = hold(state, DASH_RIGHT, DASH_DURATION_TICKS);
+      state = stepFight(state, noInputs());
+    }
+    expect(state.boat.line).toBe(DEFAULT_LINE_MAX - 5 * DASH_LINE_COST);
+    expect(state.boat.line).toBe(0);
+
+    const sixth = stepFight(state, DASH_LEFT);
+    expect(sixth.boat.dashTicksRemaining).toBe(0);
+  });
+});
+
+describe('stepFight: the pool only goes down', () => {
+  /**
+   * Task 1.8 is what adds regeneration, and it is expected to change this test
+   * deliberately. Until then a failure here is a real regression: a pool that
+   * quietly refills makes the dash free and takes the contest out of design.md
+   * section 2's contested resource.
+   *
+   * This exists because a playtest of 1.6 reported the stamina regenerating.
+   * It was a page reload restarting the fight, not the simulation, but nothing
+   * in the suite would have distinguished the two.
+   */
+  it('never rises, under any combination of inputs', () => {
+    const combinations: FightInputs[] = [];
+    for (const moveLeft of [false, true]) {
+      for (const moveRight of [false, true]) {
+        for (const dash of [false, true]) {
+          combinations.push({ moveLeft, moveRight, dash });
+        }
+      }
+    }
+
+    let state = createFightState();
+
+    // Several hundred ticks, cycling the inputs so dashes start, finish, get
+    // interrupted and are re-pressed against every steering combination.
+    for (let tick = 0; tick < 600; tick++) {
+      const inputs = combinations[tick % combinations.length];
+      const next = stepFight(state, inputs);
+
+      expect(next.boat.line).toBeLessThanOrEqual(state.boat.line);
+      state = next;
+    }
+  });
+
+  it('never rises above the pool it started with', () => {
+    const start = createFightState();
+    const after = hold(start, DASH_RIGHT, 600);
+
+    expect(after.boat.line).toBeLessThanOrEqual(start.boat.lineMax);
+  });
+
+  it('leaves the hull alone entirely, since nothing damages it yet', () => {
+    const start = createFightState();
+    const after = hold(start, DASH_RIGHT, 600);
+
+    expect(after.boat.hull).toBe(start.boat.hull);
   });
 });
 
