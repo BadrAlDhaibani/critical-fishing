@@ -13,11 +13,33 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.7, basic attack. Both gates closed; it played right
-  as built and nothing was retuned. See the 2026-08-19 decisions.md entry.
+- **Last completed task:** 1.8, stamina regeneration. 1.7 before it closed both
+  gates and was not retuned. 1.8's tests pass and it was written up at Badr's
+  request; if he has not said it feels right, the half-second pause is the
+  thing to ask about first. See the two 2026-08-19 decisions.md entries.
 - **In a half state:** nothing.
-- **Next task:** 1.8, stamina regeneration. 1.2c is still open and still not
-  gameplay-blocking.
+- **Next task:** 1.9, the fish's close punisher. This is the first task where
+  the fish does anything, so it is a bigger surface than anything since 1.3.
+  1.2c is still open and still not gameplay-blocking.
+- **What 1.9 has to ask for and must not invent.** design.md section 8 lists all
+  of these, and section 3 governs the shape:
+  - Wind-up, active and recovery durations in ticks. The wind-up is the
+    telegraph and **cannot be cancelled once started**: design.md section 3
+    calls that non-negotiable, and the dash was built to mirror it.
+  - Hull damage, priced against the 100 hull the default boat has.
+  - The hitbox: how much of the space above the fish the attack covers, in
+    internal-resolution units, and how the telegraph reads as a grey box.
+  - **Invulnerability frames on the dash.** Left open at 1.6 on purpose so that
+    1.9 decides it with something on screen to be invulnerable to. It is a real
+    decision, not a detail: without them the dash is a positional tool only.
+  - How the fish decides to attack at all, given that it is static and has no
+    bands until 1.11. A cooldown between attempts is the cheapest stand-in, and
+    its length is another number to ask for rather than pick.
+- **Where 1.9's code goes.** `sim/ai/patterns.ts` per architecture.md section 2,
+  and it stays a hard-coded pattern for one grey box fish. Task 3.1 is what
+  extracts fish into data files, so writing the definition format now is
+  building ahead of the roadmap. Do read architecture.md section 4 first
+  anyway, so the hard-coded shape does not make that extraction painful.
 - **Numbers settled so far.** All of these answer parts of design.md section 8
   and must not be re-invented or quietly retuned outside task 1.13:
   - Default boat hull 100, default line stamina pool 80, grey box fish
@@ -27,15 +49,22 @@ Update this block at the end of every batch. Keep it to a few lines.
   - Dash: 55 units over 14 ticks, costing 16. Five dashes from a full pool.
   - Basic attack: costs 8, 20-tick cooldown, 20 damage at 100 units falling to a
     floor of 6, on a true inverse curve. Ten attacks from a full pool.
-  - Still open and needed at 1.8: the regeneration rate, and whether it pauses
-    after spending or while dashing. **Ask, do not invent.** Price it against a
-    fight that should run 60 to 90 seconds against 400 resistance, given that a
-    full pool only buys 140 damage without regen.
-- **Carried out of 1.7, needed before 1.8:**
-  - A test asserts the stamina pool **never rises** under any of the sixteen
-    input combinations. **Task 1.8 is the task expected to change that test
-    deliberately**, and it is the only one. Rewrite it into whatever the new
-    rule is rather than deleting it.
+  - Stamina refill: 6 a second, paused for 30 ticks by any spend. Empty to full
+    is 13.3 seconds of not spending.
+- **Carried out of 1.8, needed before 1.9:**
+  - **The attack cooldown is 20 ticks and the refill pause is 30, so attacking
+    at full cadence means the pool never refills at all.** That is the whole
+    point of the pause and it is what 1.9's attack windows are supposed to
+    exploit: the player has to disengage to recover. If either number moves,
+    check that inequality still holds before anything else.
+  - The pool is **fractional** now, since the rate is per tick. Nothing rounds
+    it, because costs are checked against the real number; the readout floors
+    it so it can never claim an attack is affordable a tick before the
+    simulation refuses it. Tests on the pool need `toBeCloseTo`.
+  - How much was spent **cannot be read off the final pool** any more. Four
+    tests moved to a `lowestLine` helper in `tests/fight.test.ts` that returns
+    the floor the pool reached over a run of ticks. Use it rather than
+    reintroducing exact end-state arithmetic.
   - The damage curve's `k` is **derived from the anchors** in `sim/damage.ts`,
     so retuning the damage cannot leave the curve behind. Do not split it out
     into a third tunable. Damage is rounded to a whole number inside the curve,
@@ -56,10 +85,8 @@ Update this block at the end of every batch. Keep it to a few lines.
     the dash and the attack, and a dash eaten by a wall is still charged. All
     deliberate, all tested.
   - Attacking during a dash is allowed. The shared pool is the only limiter.
-  - **No invulnerability frames.** design.md section 8 lists them as an open
-    question and it was left open on purpose: there is nothing to be
-    invulnerable to until the fish attacks at 1.9, so it is 1.9's call to make
-    with something on screen to judge it against.
+  - **No invulnerability frames on the dash**, deliberately, and 1.9 is the task
+    that decides whether it gets them. See the ask list above.
   - The debug readout shows `hull`, `stam` and `resist` as `current/max`, `dmg`
     as what the next attack would deal from where the boat is standing, and
     `tether` for the line's length, which is a different thing from `stam`. If
@@ -79,11 +106,11 @@ Update this block at the end of every batch. Keep it to a few lines.
   - Line length is euclidean and includes depth, and lives in `sim/distance.ts`
     as `lineLength(boat, fish)`, which takes only the fields it reads so callers
     can measure from a position they have not built a state around yet. Derived
-    on demand, never stored on
-    `FightState`. See decisions.md, which also records why horizontal-only was
-    rejected: do not "simplify" it back to `Math.abs`. Note that `boat.line`,
-    the stamina pool, is a different thing entirely from the tether whose length
-    this measures. design.md calls both "line".
+    on demand, never stored on `FightState`. See decisions.md, which also
+    records why horizontal-only was rejected: do not "simplify" it back to
+    `Math.abs`. Note that `boat.line`, the stamina pool, is a different thing
+    entirely from the tether whose length this measures. design.md calls both
+    "line".
   - Fish depth is units below the waterline, not a screen y. `sim/` never sees
     `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
 - **Noticed but not acted on:**
@@ -149,7 +176,7 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
 - [x] **1.7 Basic attack.** Costs line, damages resistance, damage scales
       inversely with line length.
       _Context: design.md section 2, architecture.md section 4._
-- [ ] **1.8 Stamina regeneration.** Line pool refills over time.
+- [x] **1.8 Stamina regeneration.** Line pool refills over time.
       _Context: design.md section 2._
 - [ ] **1.9 Fish attack: close punisher.** Wind-up, active, recovery. Commits
       once started. Damages hull.

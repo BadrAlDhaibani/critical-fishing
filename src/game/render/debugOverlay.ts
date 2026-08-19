@@ -33,8 +33,12 @@ export interface DebugFields {
   hullMax: number;
   /**
    * The stamina pool, current and full. As a number rather than only as a bar,
-   * because task 1.7 prices an attack against it and 1.8 tunes a refill rate
-   * into it, and neither is judgeable from a proportion.
+   * because the attack and the dash are priced against it and the refill rate
+   * is tuned into it, and none of that is judgeable from a proportion.
+   *
+   * Fractional since the refill landed, and floored rather than rounded when
+   * drawn: 7.6 shown as 8 would claim an 8-cost attack is affordable when the
+   * simulation is about to refuse it.
    */
   stamina: number;
   staminaMax: number;
@@ -79,7 +83,7 @@ export class DebugOverlay {
       `sim    ${fields.tickRate.toFixed(1)}/${fields.targetTickRate} ticks/s`,
       `ticks  ${fields.totalTicks}`,
       `hull   ${fields.hull}/${fields.hullMax}`,
-      `stam   ${fields.stamina}/${fields.staminaMax}`,
+      `stam   ${Math.floor(fields.stamina)}/${fields.staminaMax}`,
       `tether ${fields.lineLength.toFixed(1)} u`,
       `resist ${fields.resistance}/${fields.resistanceMax}`,
       `dmg    ${fields.attackDamage}`,

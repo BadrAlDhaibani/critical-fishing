@@ -380,3 +380,53 @@ bar.
 Rejected: costs of 12 and 16, cooldowns of 12 and 30 ticks, 15/5 and 28/7
 damage, a linear curve, a smoothstep curve, J and the left mouse button, and
 locking attacks out for the duration of a dash.
+
+## 2026-08-19: Stamina refills at 6 a second, and any spend pauses it for half a second
+
+The regeneration rate from design.md section 8, answered, together with the
+rule for how it behaves after spending, which is the half of the question the
+open questions list does not spell out but which carries most of the feel.
+
+**6 a second**, authored per second with the per-tick value derived from
+TICK_HZ, same as the boat's speed. Empty to full is 13.3 seconds and one
+attack's cost comes back in 1.3. Worked backwards from the fish rather than
+picked: 400 resistance, split across attacking and dashing at their 1.6 and 1.7
+costs, lands the fight in the 60 to 90 seconds FISH_RESISTANCE_MAX was sized
+for. 9 a second shortened it to 45 and made dashing a habit rather than a
+decision; 4 a second pushed it past 100 and risked boring rather than tense.
+
+**Any spend pauses the refill for 30 ticks**, half a second, dash or attack
+alike. This is the Dark Souls rule and it was chosen over a constant trickle
+because the trickle gives the player no reason to ever stop pressing: it just
+discounts each attack from 8 to about 6 and changes nothing about how the fight
+is played.
+
+The load-bearing consequence, and the reason 30 was picked rather than any other
+delay: **the attack cooldown is 20 ticks and the pause is 30, so attacking at
+full cadence means the refill never runs at all.** Ten attacks in 3.3 seconds
+and then nothing comes back until the player disengages. Recovering is a
+positional decision, and from task 1.9 the moments spent recovering are exactly
+the fish's attack windows. A 60-tick pause was rejected as punishing to commit
+to before the fish is even attacking.
+
+One thing falls out rather than being coded: a dash lasts 14 ticks, which sits
+inside the 30-tick pause its own cost started, so the pool never moves
+mid-dash. There is no special case for it and there should not be one.
+
+Two implementation notes that are decisions rather than detail. "Spent this
+tick" is read off the pool itself rather than from a flag each action sets, so a
+dash and an attack in the same tick is one delay, not two: it is the pool
+recovering, not the actions. And the pool is **fractional** now, since the rate
+is per tick. Nothing rounds it, because the costs are checked against the real
+number, so the debug readout floors it instead: 7.6 shown as 8 would claim an
+8-cost attack is affordable a tick before the simulation refuses it.
+
+This also retired the "the pool only goes down" test, which the 1.6 handoff had
+been carrying a warning about since a playtest misread a page reload as
+regeneration. It was rewritten into the new rule rather than deleted, and four
+older dash and attack tests moved from asserting an exact final pool to
+asserting the floor the pool reached, since how much was spent can no longer be
+read off the end state.
+
+Rejected: 9 and 4 a second, a constant trickle with no pause, a 60-tick pause,
+and pausing only during a dash.

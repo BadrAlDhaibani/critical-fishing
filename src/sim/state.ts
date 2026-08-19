@@ -34,7 +34,12 @@ export interface BoatState {
   hullMax: number;
   /**
    * The contested stamina resource. Spent by both dashing and attacking, and
-   * regenerating over time from task 1.8.
+   * refilling over time once `regenDelayRemaining` has run out.
+   *
+   * Fractional, because the refill is a per-tick rate rather than whole points.
+   * Nothing rounds it: the costs are checked against the real number, so the
+   * readout floors it rather than rounding, and never claims an attack is
+   * affordable when it is not.
    *
    * Not the tether. `sim/distance.ts` computes the length of the thing joining
    * the boat to the fish, which is a derived distance and unrelated to this
@@ -83,6 +88,16 @@ export interface BoatState {
    * reason.
    */
   attackHeld: boolean;
+  /**
+   * Ticks until the stamina pool starts refilling again, or 0 when it is
+   * already refilling. Reset in full by any spend, dash or attack.
+   *
+   * One counter for both actions rather than one each, because the pool they
+   * share is the thing being recovered. A dash taken during an attack's
+   * recovery has to buy the whole delay again, which is what makes panicking
+   * twice in a row expensive.
+   */
+  regenDelayRemaining: number;
 }
 
 export interface FishState {
@@ -161,6 +176,7 @@ export function createFightState(): FightState {
       dashHeld: false,
       attackCooldownRemaining: 0,
       attackHeld: false,
+      regenDelayRemaining: 0,
     },
     fish: {
       x: FISH_START_X,

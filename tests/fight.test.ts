@@ -17,6 +17,9 @@ import {
   DEFAULT_LINE_MAX,
   FISH_RESISTANCE_MAX,
   INTERNAL_WIDTH,
+  LINE_REGEN_DELAY_TICKS,
+  LINE_REGEN_PER_SECOND,
+  LINE_REGEN_PER_TICK,
 } from '../src/data/config.ts';
 
 const LEFT: FightInputs = { ...noInputs(), moveLeft: true };
@@ -36,6 +39,24 @@ function hold(state: FightState, inputs: FightInputs, n: number): FightState {
     next = stepFight(next, inputs);
   }
   return next;
+}
+
+/**
+ * The lowest the pool gets over n ticks of one held input.
+ *
+ * How much was spent cannot be read off the final pool any more, because the
+ * refill starts putting it back half a second later. The floor is what says how
+ * many times an action was actually charged.
+ */
+function lowestLine(state: FightState, inputs: FightInputs, n: number): number {
+  let next = state;
+  let lowest = state.boat.line;
+
+  for (let i = 0; i < n; i++) {
+    next = stepFight(next, inputs);
+    lowest = Math.min(lowest, next.boat.line);
+  }
+  return lowest;
 }
 
 describe('createFightState: opening resources', () => {
@@ -230,8 +251,12 @@ describe('stepFight: dash', () => {
     };
     const after = stepFight(broke, DASH_RIGHT);
 
-    // Still walks. It is a refusal to dash, not a refusal to move.
-    expect(after.boat.line).toBe(DASH_LINE_COST - 1);
+    // Still walks. It is a refusal to dash, not a refusal to move. Nothing was
+    // charged, so the pool went up by one tick of refill rather than down.
+    expect(after.boat.line).toBeCloseTo(
+      broke.boat.line + LINE_REGEN_PER_TICK,
+      8,
+    );
     expect(after.boat.dashTicksRemaining).toBe(0);
     expect(after.boat.x - broke.boat.x).toBeCloseTo(BOAT_SPEED_PER_TICK, 10);
   });
@@ -252,9 +277,11 @@ describe('stepFight: dash', () => {
   // decision being made.
   it('does not chain while the key stays held', () => {
     const start = createFightState();
-    const after = hold(start, DASH_RIGHT, DASH_DURATION_TICKS * 4);
+    const lowest = lowestLine(start, DASH_RIGHT, DASH_DURATION_TICKS * 4);
 
-    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
+    // The floor rather than the final pool: four dash durations is long enough
+    // for the refill to have started putting the one dash back.
+    expect(lowest).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
   });
 
   it('dashes again once the key is released and pressed afresh', () => {
@@ -352,8 +379,11 @@ describe('stepFight: basic attack', () => {
     const after = hold(start, ATTACK, 200);
 
     // 200 ticks is ten cooldowns, so a key repeat would have emptied the pool
-    // several times over. One press is one attack.
-    expect(after.boat.line).toBe(DEFAULT_LINE_MAX - ATTACK_LINE_COST);
+    // several times over. One press is one attack, and the floor is what shows
+    // it: by tick 200 the refill has long since topped the pool back up.
+    expect(lowestLine(start, ATTACK, 200)).toBe(
+      DEFAULT_LINE_MAX - ATTACK_LINE_COST,
+    );
     expect(after.fish.resistance).toBe(
       start.fish.resistance - expectedDamage(after),
     );
@@ -389,7 +419,11 @@ describe('stepFight: basic attack', () => {
     };
     const after = stepFight(broke, ATTACK);
 
-    expect(after.boat.line).toBe(ATTACK_LINE_COST - 1);
+    // Nothing charged, so the pool rose by a tick of refill instead.
+    expect(after.boat.line).toBeCloseTo(
+      broke.boat.line + LINE_REGEN_PER_TICK,
+      8,
+    );
     expect(after.fish.resistance).toBe(start.fish.resistance);
     expect(after.boat.attackCooldownRemaining).toBe(0);
   });
@@ -459,18 +493,24 @@ describe('stepFight: basic attack', () => {
   });
 });
 
-describe('stepFight: the pool only goes down', () => {
+describe('stepFight: the pool refills', () => {
   /**
-   * Task 1.8 is what adds regeneration, and it is expected to change this test
-   * deliberately. Until then a failure here is a real regression: a pool that
-   * quietly refills makes the dash free and takes the contest out of design.md
-   * section 2's contested resource.
+   * This suite used to assert the pool never rises at all. Task 1.8 is the one
+   * task allowed to change that, and this is that change: the rule is now that
+   * it only rises when nothing has been spent for the delay, and never past
+   * the maximum.
    *
-   * This exists because a playtest of 1.6 reported the stamina regenerating.
-   * It was a page reload restarting the fight, not the simulation, but nothing
-   * in the suite would have distinguished the two.
+   * It exists because a playtest of 1.6 reported the stamina regenerating
+   * before anything regenerated it. That turned out to be a page reload, but
+   * nothing in the suite could have told the two apart. Now that a refill is
+   * real, the guard has to be that it refills on exactly the rule intended.
    */
-  it('never rises, under any combination of inputs', () => {
+  const START_EMPTY: FightState = (() => {
+    const start = createFightState();
+    return { ...start, boat: { ...start.boat, line: 0 } };
+  })();
+
+  it('never exceeds the maximum, under any combination of inputs', () => {
     const combinations: FightInputs[] = [];
     for (const moveLeft of [false, true]) {
       for (const moveRight of [false, true]) {
@@ -484,22 +524,102 @@ describe('stepFight: the pool only goes down', () => {
 
     let state = createFightState();
 
-    // Several hundred ticks, cycling the inputs so dashes start, finish, get
-    // interrupted and are re-pressed against every steering combination.
+    // Several hundred ticks, cycling the inputs so dashes and attacks start,
+    // finish, get interrupted and are re-pressed against every steering
+    // combination, with the refill running between them throughout.
     for (let tick = 0; tick < 600; tick++) {
-      const inputs = combinations[tick % combinations.length];
-      const next = stepFight(state, inputs);
+      state = stepFight(state, combinations[tick % combinations.length]);
 
-      expect(next.boat.line).toBeLessThanOrEqual(state.boat.line);
-      state = next;
+      expect(state.boat.line).toBeLessThanOrEqual(state.boat.lineMax);
+      expect(state.boat.line).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it('never rises above the pool it started with', () => {
-    const start = createFightState();
-    const after = hold(start, DASH_RIGHT, 600);
+  it('refills at the rate it is configured with', () => {
+    const after = hold(START_EMPTY, noInputs(), 60);
 
-    expect(after.boat.line).toBeLessThanOrEqual(start.boat.lineMax);
+    expect(after.boat.line).toBeCloseTo(LINE_REGEN_PER_SECOND, 8);
+  });
+
+  it('fills an empty pool in about the time the rate implies', () => {
+    const ticks = Math.ceil(DEFAULT_LINE_MAX / LINE_REGEN_PER_TICK);
+
+    // A tick of slack, because eight hundred additions of a per-tick rate land
+    // a hair either side of the total and the cap is what makes it exact.
+    expect(hold(START_EMPTY, noInputs(), ticks + 1).boat.line).toBe(
+      DEFAULT_LINE_MAX,
+    );
+
+    // And not appreciably sooner, which is what catches a rate set too high.
+    expect(hold(START_EMPTY, noInputs(), ticks - 60).boat.line).toBeLessThan(
+      DEFAULT_LINE_MAX,
+    );
+  });
+
+  it('tops out at the maximum rather than overfilling', () => {
+    const after = hold(createFightState(), noInputs(), 600);
+
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX);
+  });
+
+  // The Dark Souls rule, and where most of the feel lives. Recovering has to be
+  // something the player disengages to do.
+  it('does not refill at all during the delay after a spend', () => {
+    const start = createFightState();
+    const dashed = stepFight(start, DASH_RIGHT);
+
+    let state = dashed;
+    for (let i = 0; i < LINE_REGEN_DELAY_TICKS - 1; i++) {
+      state = stepFight(state, noInputs());
+      expect(state.boat.line).toBe(dashed.boat.line);
+    }
+
+    // The tick the counter reaches zero is the tick the refill resumes on.
+    expect(stepFight(state, noInputs()).boat.line).toBeGreaterThan(
+      dashed.boat.line,
+    );
+  });
+
+  it('starts the delay again from the top on a second spend', () => {
+    const start = createFightState();
+    let state = stepFight(start, DASH_RIGHT);
+
+    // Most of the way through the first delay, then attack.
+    state = hold(state, noInputs(), LINE_REGEN_DELAY_TICKS - 5);
+    state = stepFight(state, ATTACK);
+
+    const spent = state.boat.line;
+
+    // The five ticks left on the old delay do not carry the refill forward:
+    // the whole delay has to run again from the attack.
+    state = hold(state, noInputs(), LINE_REGEN_DELAY_TICKS - 1);
+    expect(state.boat.line).toBe(spent);
+  });
+
+  // Falls out of the delay rather than being coded: the dash's own cost pauses
+  // the refill for longer than the dash itself lasts.
+  it('does not refill mid-dash', () => {
+    const start = createFightState();
+    const dashing = stepFight(start, DASH_RIGHT);
+    const finished = hold(dashing, noInputs(), DASH_DURATION_TICKS - 1);
+
+    expect(finished.boat.dashTicksRemaining).toBe(0);
+    expect(finished.boat.line).toBe(DEFAULT_LINE_MAX - DASH_LINE_COST);
+  });
+
+  // The contest design.md section 2 is built on. If the refill ever outran
+  // attacking, the pool would stop being a resource and start being decoration.
+  it('cannot keep up with attacking at full cadence', () => {
+    let state = createFightState();
+
+    // Press, release, press again the moment the cooldown allows it, for as
+    // long as the pool holds out.
+    for (let i = 0; i < 10; i++) {
+      state = stepFight(state, ATTACK);
+      state = hold(state, noInputs(), ATTACK_COOLDOWN_TICKS);
+    }
+
+    expect(state.boat.line).toBeLessThan(DEFAULT_LINE_MAX / 2);
   });
 
   it('leaves the hull alone entirely, since nothing damages it yet', () => {

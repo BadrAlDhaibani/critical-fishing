@@ -116,6 +116,29 @@ export const ATTACK_LINE_COST = 8;
 export const ATTACK_COOLDOWN_TICKS = 20;
 
 /**
+ * Stamina regeneration. Chosen 2026-08-19, see decisions.md.
+ *
+ * 6 a second refills the whole pool in 13.3 seconds and one attack's cost in
+ * 1.3. Worked backwards from the fish: 400 resistance split across attacking
+ * and dashing lands the fight in the 60 to 90 seconds FISH_RESISTANCE_MAX was
+ * sized for. Attacking flat out spends 24 a second, so a burst always has to be
+ * paid off afterwards.
+ *
+ * The delay is the Dark Souls rule and is where most of the feel lives. Any
+ * spend, dash or attack, stops the refill for half a second, so attacking at
+ * full cadence means it never runs at all and recovering is something you
+ * disengage to do. From task 1.9 the moments spent recovering are the fish's
+ * attack windows, which is the point. It also means the refill never runs
+ * during a dash, since 14 ticks of dash sit inside the 30-tick pause its own
+ * cost started, without that needing to be coded as a special case.
+ *
+ * Authored per second, per-tick derived from TICK_HZ, same as the boat's speed.
+ */
+export const LINE_REGEN_PER_SECOND = 6;
+export const LINE_REGEN_PER_TICK = LINE_REGEN_PER_SECOND / TICK_HZ;
+export const LINE_REGEN_DELAY_TICKS = 30;
+
+/**
  * The damage-by-distance curve. Chosen 2026-08-19, see decisions.md.
  *
  * design.md section 2: damage scales inversely with line length, and that

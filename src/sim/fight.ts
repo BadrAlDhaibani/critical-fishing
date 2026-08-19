@@ -21,6 +21,8 @@ import {
   DASH_LINE_COST,
   DASH_SPEED_PER_TICK,
   INTERNAL_WIDTH,
+  LINE_REGEN_DELAY_TICKS,
+  LINE_REGEN_PER_TICK,
 } from '../data/config.ts';
 import { basicAttackDamage } from './damage.ts';
 import { lineLength } from './distance.ts';
@@ -132,9 +134,22 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     resistance = Math.max(0, resistance - damage);
   }
 
+  // Any spend at all restarts the delay, read off the pool itself rather than
+  // from a flag each action has to remember to set. Both a dash and an attack
+  // in the same tick is still one delay, which is correct: it is the pool
+  // recovering, not the actions.
+  const spent = line < state.boat.line;
+  const regenDelayRemaining = spent
+    ? LINE_REGEN_DELAY_TICKS
+    : Math.max(0, state.boat.regenDelayRemaining - 1);
+
+  if (regenDelayRemaining === 0) {
+    line = Math.min(state.boat.lineMax, line + LINE_REGEN_PER_TICK);
+  }
+
   // Both objects are rebuilt from scratch every tick, so every field has to be
   // named here or it silently disappears one tick into the fight. Nothing
-  // spends hull yet: 1.8 refills the pool and 1.9 damages the hull.
+  // touches hull yet: 1.9 is what damages it.
   //
   // The fish used to be carried forward by reference, which was only ever safe
   // while nothing wrote to it. The basic attack writes to it.
@@ -151,6 +166,7 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       dashHeld: inputs.dash,
       attackCooldownRemaining,
       attackHeld: inputs.attack,
+      regenDelayRemaining,
     },
     fish: {
       x: state.fish.x,
