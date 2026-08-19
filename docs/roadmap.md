@@ -13,15 +13,24 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** bare Vite + TypeScript scaffold, done manually by
-  Badr. Task 1.1 is therefore partially complete.
-- **In a half state:** 1.1. The Vite + vanilla-ts scaffold exists and
-  `npm run dev` boots. Still outstanding in 1.1: install Phaser 3, Vitest and
-  eslint; enable TypeScript strict mode; create the `src/` folder structure per
-  architecture.md section 2; render an empty scene with a blue water rectangle.
-- **Open from last playtest:** nothing, nothing playable yet
-- **Noticed but not acted on:** the internal render resolution is unresolved
-  and is required by task 1.2b before any movement is built. Ask Badr for it.
+- **Last completed task:** 1.2b, plus a follow-up pass for what the playtest
+  found. 1.1, 1.2 and 1.2b were one approved batch, since none is playtestable
+  on its own.
+- **In a half state:** nothing. Tests, lint and build all green.
+- **Open from last playtest:** passed. Interpolation fluid, debug text crisp,
+  water reads right, `WATER_LINE_Y = 70` confirmed. The `sim` readout sitting a
+  little under 60.0 for the first minute is expected: it is a cumulative average
+  and Phaser's boot frame contributes wall time before the first tick, so the
+  deficit decays as 1/t. A number that **falls** over time would mean genuinely
+  dropped ticks and is worth chasing.
+- **Noticed but not acted on:**
+  - Fullscreen zoom reads `3x` where `4x` is expected. Now task 1.2c.
+  - `FightScene` still holds the TEMPORARY debug markers and `DebugState`; task
+    1.3 deletes them. `game/render/debugOverlay.ts` is permanent, not scaffolding.
+  - architecture.md section 2 does not list `sim/loop.ts`, which now exists.
+    One-line edit proposed, waiting on a yes. Firm tier, do not write it
+    unprompted.
+  - Phaser pinned at `^3.90.0`; npm `latest` is 4.2.1. Stack decision not made.
 
 ---
 
@@ -33,17 +42,27 @@ the game is downstream of that answer.
 No sprites, no menus, no save data, no server, no Discord, no title screen.
 Coloured rectangles only.
 
-- [ ] **1.1 Project init.** Vite + TypeScript + Phaser 3, Vitest, eslint,
+- [x] **1.1 Project init.** Vite + TypeScript + Phaser 3, Vitest, eslint,
       strict mode. Empty scene rendering a blue rectangle for water.
       *Context: CLAUDE.md, architecture.md sections 2 and 3.*
-- [ ] **1.2 Fixed timestep loop.** 60 Hz accumulator, decoupled from render,
+- [x] **1.2 Fixed timestep loop.** 60 Hz accumulator, decoupled from render,
       render interpolating between the last two states. Test it.
       *Context: architecture.md section 3.*
-- [ ] **1.2b Render configuration.** Lock the internal resolution. `pixelArt:
+- [x] **1.2b Render configuration.** Lock the internal resolution. `pixelArt:
       true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
       to fit the window. All simulation units are internal-resolution pixels
       from this point on. Ask Badr for the resolution, do not pick one.
       *Context: design.md section 6 (Art direction) and section 8.*
+- [ ] **1.2c Confirm integer zoom at fullscreen.** The readout showed `@ 3x` in
+      F11 fullscreen on a display Badr reports as 100% scaled, where 1920x1080
+      should give `4x`. Diagnose before fixing: run `devicePixelRatio`,
+      `innerWidth` and `innerHeight` in the console while fullscreen. If
+      `innerHeight` is 1080 and it still reads 3x, the recompute in
+      `src/main.ts` is at fault, and the likely cause is the `resize` event
+      firing mid-transition with nothing recomputing once the window settles. If
+      `innerHeight` is under 1080 the behaviour is already correct and this task
+      just closes. Not gameplay-blocking, 1.3 can go first.
+      *Context: design.md section 6 (Art direction).*
 - [ ] **1.3 Boat movement.** `A`/`D` move a rectangle along the surface. Sim
       module owns the movement, Phaser only draws it.
       *Context: architecture.md sections 1 and 2, design.md section 2.*

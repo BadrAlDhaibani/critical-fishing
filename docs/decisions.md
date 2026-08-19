@@ -119,3 +119,78 @@ Reasoning: each session starts with no memory of the previous one, so a fresh
 session with edit rights and a plausible idea could weaken a decision reached
 over a long discussion, and it would not be noticed because code gets reviewed
 and docs do not. `git diff docs/` before each commit makes drift visible.
+
+## 2026-08-19: Internal render resolution locked at 480x270
+
+The open question from design.md section 8, answered. Every tuned number in the
+game is now expressed in these units: boat speed, dash distance, hitbox sizes,
+distance band edges.
+
+480x270 scales by exactly 4x to 1080p. The deciding factor over 320x180 was
+horizontal room: one axis carries dodging, positioning and damage output all at
+once, and 320 units of lane makes distance band edges and dash distances coarse
+in a way that would be felt during tuning. 640x360 was also available and was
+passed over as less chunky than the Terraria neighbourhood the art direction
+asks for.
+
+Rejected: 320x180, 640x360.
+
+## 2026-08-19: Prettier added to the toolchain
+
+Formatting is automatic and never something Badr has to review or correct.
+Two devDependencies, `prettier` and `eslint-config-prettier`, the latter purely
+to switch off the eslint rules that would fight it.
+
+The dependency set approved this session: phaser, vitest, eslint, @eslint/js,
+typescript-eslint, prettier, eslint-config-prettier. The sim-must-not-import-
+Phaser boundary from architecture.md section 1 is enforced by eslint's built-in
+`no-restricted-imports` scoped to `src/sim/**`, so it needed no extra plugin.
+
+## 2026-08-19: Phase 1 infrastructure done as one batch
+
+Tasks 1.1, 1.2 and 1.2b were run together rather than as three stop-and-wait
+batches. None of the three produces anything playable, so the "Badr has played
+it and said it feels right" gate could not close on any of them individually,
+and three round trips would have bought nothing.
+
+This is a deliberate exception, not a loosening of the one-task-per-batch rule.
+The rule exists so that design decisions do not get chained together unreviewed,
+and infrastructure with no gameplay surface carries no design decisions. From
+1.3 onward, where every task is a fight decision Badr can feel, the normal
+one-task rule applies.
+
+Rejected: 1.1 alone (ends at a blue rectangle with nothing to judge), pushing
+through to 1.5 (five tasks of unreviewed gameplay decisions at once).
+
+## 2026-08-19: Debug and tuning text lives in the DOM, not the canvas
+
+Tried first as a Phaser text object at 8px inside the 480x270 canvas. It looked
+mushy next to the rectangles. The browser rasterises the font with antialiasing,
+then the whole canvas is scaled up by a whole number with nearest-neighbour
+filtering, so every soft grey edge pixel becomes a solid 3x3 block of grey.
+Canvas text and pixel-art upscaling cannot both be right.
+
+Moved to a DOM element layered over the canvas. It renders at the monitor's
+native resolution, is sharp at any zoom, and costs none of the internal
+resolution budget. This applies to any future debug or tuning display.
+
+It does not apply to in-game UI. The hull and line bars at task 1.5 are game
+objects, they belong inside the pixel grid, and they are rectangles rather than
+text so none of this bites them.
+
+Rejected: a bitmap font, which is the correct answer for in-canvas text but
+needs a font asset and belongs with the phase 8 art pass.
+
+## 2026-08-19: The arena has no floor
+
+A darker band across the lower water was tried as a depth cue and read as a
+seabed. Removed in favour of one flat water colour.
+
+Fish depth is AI-driven through open water, and a horizontal line down there
+implies a boundary the fight does not have. During the tuning pass it would be
+read as the bottom of the arena and would quietly distort judgements about
+depth and line length.
+
+Also confirmed by the same playtest: `WATER_LINE_Y = 70`, giving 70 units of sky
+above the surface and 200 of water below. The sky is not waste. The fish
+breaching needs headroom and the bars go up there at task 1.5.
