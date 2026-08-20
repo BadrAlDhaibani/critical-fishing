@@ -28,6 +28,21 @@ export interface DebugFields {
    * the bars refilling themselves.
    */
   totalTicks: number;
+  /**
+   * Which stage of its own lifetime the fight is in, and the ticks left in it.
+   *
+   * The reel-in is the only stage with a duration, so the counter reads zero in
+   * the other three. Worth showing because the two endings are drawn as a flat
+   * colour wash and nothing else: the wash says which one happened, and this says
+   * it in words, which is what the tuning pass needs when the question is whether
+   * two seconds of reel-in reads as a beat or as a hang.
+   *
+   * It also disambiguates `totalTicks` above. That dropping to zero used to mean
+   * only "the page reloaded"; since the restart key it also means "R was
+   * pressed", and this is what tells the two apart.
+   */
+  stage: string;
+  stageTicks: number;
   /** Hull HP, current and full. */
   hull: number;
   hullMax: number;
@@ -95,6 +110,20 @@ function attackLabel(fields: DebugFields): string {
     : `${fields.fishAttackKind}:${fields.fishPhase}`;
 }
 
+/**
+ * "reelIn 87" while the reel-in runs, plain "fighting" otherwise.
+ *
+ * The counter is dropped rather than shown as a zero, unlike the fish line
+ * below, which always has one counter or the other running. Three of the four
+ * stages have no duration at all, so a zero there would be a number that never
+ * means anything.
+ */
+function stageLabel(fields: DebugFields): string {
+  return fields.stageTicks > 0
+    ? `${fields.stage} ${fields.stageTicks}`
+    : fields.stage;
+}
+
 export class DebugOverlay {
   private readonly element: HTMLElement;
 
@@ -115,6 +144,7 @@ export class DebugOverlay {
       `render ${Math.round(fields.fps)} fps`,
       `sim    ${fields.tickRate.toFixed(1)}/${fields.targetTickRate} ticks/s`,
       `ticks  ${fields.totalTicks}`,
+      `stage  ${stageLabel(fields)}`,
       `hull   ${fields.hull}/${fields.hullMax}`,
       `stam   ${Math.floor(fields.stamina)}/${fields.staminaMax}`,
       `tether ${fields.lineLength.toFixed(1)} u  (${fields.band})`,

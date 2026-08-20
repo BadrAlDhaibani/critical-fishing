@@ -23,12 +23,13 @@ import {
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_TICK,
+  REEL_IN_TICKS,
 } from '../data/config.ts';
 import { stepReposition } from './ai/bands.ts';
 import { stepFishAttack, stepProjectiles } from './ai/patterns.ts';
 import { basicAttackDamage } from './damage.ts';
 import { bandFor, lineLength } from './distance.ts';
-import type { FightInputs, FightState } from './state.ts';
+import type { FightInputs, FightStage, FightState } from './state.ts';
 
 /**
  * Leftmost and rightmost the boat's centre may sit, so the hull never leaves
@@ -42,6 +43,42 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * Advance a fight that is already over by exactly one tick.
+ *
+ * Everything about the fight is frozen here: the boat does not move, no input is
+ * read, the fish does not attack, and shots already in the air neither travel nor
+ * resolve. design.md section 2 says the win **cuts** to a reel-in rather than
+ * running one alongside the fight, and the same has to be true of the loss: a
+ * punisher landing on a boat that has already won, or a killing blow landing on a
+ * fish after the hull is gone, would make the outcome a lie about what happened.
+ *
+ * Spreading the state rather than naming every field is the opposite of what the
+ * main body below has to do, and it is right here for the same reason it is wrong
+ * there. Nothing simulates in this function, so the ended state is a frozen
+ * snapshot of the moment the fight finished, and enumerating `boat` and `fish`
+ * again would only create a second place a newly added field could be dropped.
+ * Sharing the objects by reference is safe because nothing in sim/ mutates.
+ *
+ * `tick` keeps counting in every stage. A frozen fight whose clock had also
+ * stopped would be indistinguishable from a hung simulation, and the reel-in
+ * still has a duration to count out.
+ */
+function stepEnding(state: FightState): FightState {
+  if (state.stage !== 'reelIn') {
+    return { ...state, tick: state.tick + 1 };
+  }
+
+  const remaining = state.stageTicksRemaining - 1;
+
+  return {
+    ...state,
+    tick: state.tick + 1,
+    stage: remaining > 0 ? 'reelIn' : 'landed',
+    stageTicksRemaining: Math.max(0, remaining),
+  };
+}
+
+/**
  * Advance the fight by exactly one tick.
  *
  * Returns a new state object and never mutates the one passed in. This is not
@@ -51,6 +88,12 @@ function clamp(value: number, min: number, max: number): number {
  * stop working while still looking almost right.
  */
 export function stepFight(state: FightState, inputs: FightInputs): FightState {
+  // A fight that has ended runs no fight logic at all, so everything below this
+  // line can assume there is still a fight to simulate.
+  if (state.stage !== 'fighting') {
+    return stepEnding(state);
+  }
+
   // Holding both directions cancels to a standstill rather than favouring one
   // of them. Nothing is gained by picking a winner, and a tie that resolves to
   // movement reads as the game ignoring an input.
@@ -186,6 +229,18 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     state.boat.hull - attack.hullDamage - shots.hullDamage,
   );
 
+  // Resistance is asked first, so a tick that empties both bars is a win. That
+  // is not generosity, it is the order this function already resolves in: the
+  // player's attack was charged against resistance well above, and the fish's
+  // damage was applied to the hull two lines ago, so the killing blow genuinely
+  // landed first and the ending should say what happened.
+  //
+  // Both were clamped at zero where they were computed, so `<= 0` and `=== 0`
+  // are the same test here. The inequality is the one that stays correct if a
+  // future source of damage forgets to clamp.
+  const stage: FightStage =
+    resistance <= 0 ? 'reelIn' : hull <= 0 ? 'escaped' : 'fighting';
+
   // Both objects are rebuilt from scratch every tick, so every field has to be
   // named here or it silently disappears one tick into the fight.
   //
@@ -193,6 +248,10 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // while nothing wrote to it. The basic attack writes to it.
   return {
     tick: state.tick + 1,
+    stage,
+    // Only the reel-in has a duration to count, so every other stage seeds zero
+    // and `stepEnding` never looks at it again.
+    stageTicksRemaining: stage === 'reelIn' ? REEL_IN_TICKS : 0,
     boat: {
       x,
       hull,

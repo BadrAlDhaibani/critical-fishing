@@ -15,6 +15,11 @@ import {
   COLOUR_BAR_HULL,
   COLOUR_BAR_LINE,
   COLOUR_BAR_RESISTANCE,
+  COLOUR_ENDING_ESCAPED,
+  COLOUR_ENDING_LANDED,
+  COLOUR_REEL_IN_LINE,
+  ENDING_TINT_ALPHA,
+  REEL_IN_LINE_WIDTH,
   BAR_WIDTH,
   BAR_HEIGHT,
   BAR_MARGIN,
@@ -56,6 +61,8 @@ export class FightScene extends Phaser.Scene {
   private lineBar!: Bar;
   private resistanceBar!: Bar;
 
+  private endingTint!: Phaser.GameObjects.Rectangle;
+
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
 
@@ -76,10 +83,8 @@ export class FightScene extends Phaser.Scene {
 
     this.controls = createFightControls(this);
 
-    const initialState = createFightState();
-    this.driver = new FixedStepDriver<FightState>(initialState, (state) =>
-      stepFight(state, this.inputs),
-    );
+    this.startFight();
+    const initialState = this.driver.current;
 
     // Added before the boat and fish so it draws underneath both, and the
     // endpoints disappear into the hull and the body rather than crossing them.
@@ -133,7 +138,43 @@ export class FightScene extends Phaser.Scene {
       COLOUR_BAR_RESISTANCE,
     );
 
+    // Added last, so it washes over the bars as well as the fight. The alpha
+    // leaves both readable underneath: the empty bar and the position the boat
+    // died in are the information the player actually wants out of an ending.
+    this.endingTint = this.add
+      .rectangle(
+        0,
+        0,
+        INTERNAL_WIDTH,
+        INTERNAL_HEIGHT,
+        COLOUR_ENDING_ESCAPED,
+        ENDING_TINT_ALPHA,
+      )
+      .setOrigin(0, 0)
+      .setVisible(false);
+
     this.overlay = new DebugOverlay();
+  }
+
+  /**
+   * Point the driver at a brand new fight.
+   *
+   * Rebuilt rather than reset, so `previous` is seeded with the fresh state too
+   * and no frame interpolates the boat from where the last fight ended to where
+   * the next one begins.
+   *
+   * The step closure reads `this.inputs` at call time rather than capturing a
+   * snapshot, so it survives being made once here and used for every fight.
+   */
+  private startFight(): void {
+    this.driver = new FixedStepDriver<FightState>(createFightState(), (state) =>
+      stepFight(state, this.inputs),
+    );
+
+    // Reset alongside `totalTicks`, which the driver has just taken back to
+    // zero. Left alone, the tick rate would be a fresh fight's ticks divided by
+    // every second since the page loaded, and would read as permanent drift.
+    this.elapsedMs = 0;
   }
 
   update(_time: number, delta: number): void {
@@ -143,9 +184,22 @@ export class FightScene extends Phaser.Scene {
     // read even if the ticks would accept it.
     this.inputs = readFightInputs(this.controls);
 
+    // Only once a fight is over, so a hand still on the controls cannot rage
+    // restart one that is going badly. Read straight off the key rather than
+    // through FightInputs: restarting is the scene's business, not the
+    // simulation's, so `JustDown` at frame rate is the right resolution for it.
+    if (
+      this.driver.current.stage !== 'fighting' &&
+      Phaser.Input.Keyboard.JustDown(this.controls.restart)
+    ) {
+      this.startFight();
+    }
+
     this.driver.advance(delta);
 
     const { previous, current, alpha } = this.driver;
+    const { stage } = current;
+    const fighting = stage === 'fighting';
 
     const boatX = lerp(previous.boat.x, current.boat.x, alpha);
     const fishX = lerp(previous.fish.x, current.fish.x, alpha);
@@ -160,24 +214,56 @@ export class FightScene extends Phaser.Scene {
     // use, so the line can never sit a frame behind the things it connects.
     // The boat end is the waterline rather than the hull centre, because the
     // line goes into the water, not through the boat.
+    //
+    // Thicker and in its own colour through the reel-in. design.md pillar 4
+    // makes the line the identity and the reel-in is the beat that is entirely
+    // about it, so the stub is drawn there. It is also the only thing moving
+    // during those two seconds, and without it a frozen fight would read as a
+    // hang rather than as a final run.
     this.line.clear();
-    this.line.lineStyle(1, COLOUR_LINE);
+    this.line.lineStyle(
+      stage === 'reelIn' ? REEL_IN_LINE_WIDTH : 1,
+      stage === 'reelIn' ? COLOUR_REEL_IN_LINE : COLOUR_LINE,
+    );
     this.line.lineBetween(boatX, WATER_LINE_Y, fishX, fishY);
 
     // Phase off the current simulation state, position off the interpolated
     // values: which phase the fish is in is a discrete fact that must not be
     // smeared across a frame, but where the box sits has to agree with the fish
     // drawn at the same instant.
+    //
+    // Nothing dangerous is drawn once the fight is over. The simulation keeps an
+    // honest frozen snapshot of what the fish was in the middle of, which is what
+    // phase 4's record book will want, but a telegraph is a promise that
+    // something is about to hurt you and a fight that has ended cannot keep it.
+    // Hiding it here rather than blanking the fish in sim/ is the cheaper half of
+    // that, and the half that does not lie about what happened.
     this.telegraph.show(
-      this.driver.current.fish.attackPhase,
-      this.driver.current.fish.attackKind,
+      fighting ? current.fish.attackPhase : 'idle',
+      fighting ? current.fish.attackKind : null,
       fishX,
       fishY,
     );
 
     // Not interpolated, unlike the boat and the fish: shots appear and vanish,
     // so there is no stable pairing between one tick's list and the next's.
-    this.projectiles.show(this.driver.current.projectiles);
+    // Cleared once the fight is over for the same reason the telegraph is: they
+    // are frozen mid-flight and can no longer resolve against anything.
+    this.projectiles.show(fighting ? current.projectiles : []);
+
+    // Only the two endings wash the screen. The reel-in is still the fight being
+    // looked at, and the line above is what marks it.
+    const ended = stage === 'landed' || stage === 'escaped';
+    this.endingTint.setVisible(ended);
+    if (ended) {
+      // Alpha passed every time, because Phaser's setFillStyle resets it to
+      // fully opaque when it is left out, which would black the fight out
+      // completely rather than washing over it.
+      this.endingTint.setFillStyle(
+        stage === 'landed' ? COLOUR_ENDING_LANDED : COLOUR_ENDING_ESCAPED,
+        ENDING_TINT_ALPHA,
+      );
+    }
 
     this.updateBars();
     this.updateReadout(delta);
@@ -207,7 +293,7 @@ export class FightScene extends Phaser.Scene {
     const seconds = this.elapsedMs / 1000;
     const tickRate = seconds > 0 ? this.driver.totalTicks / seconds : 0;
 
-    const { boat, fish } = this.driver.current;
+    const { boat, fish, stage, stageTicksRemaining } = this.driver.current;
     const tether = lineLength(boat, fish);
 
     this.overlay.update({
@@ -217,6 +303,8 @@ export class FightScene extends Phaser.Scene {
       tickRate,
       targetTickRate: TICK_HZ,
       totalTicks: this.driver.totalTicks,
+      stage,
+      stageTicks: stageTicksRemaining,
       hull: boat.hull,
       hullMax: boat.hullMax,
       stamina: boat.line,

@@ -397,6 +397,59 @@ export const FISH_DIVE_PER_TICK = FISH_DIVE_PER_SECOND / TICK_HZ;
 export const FISH_FAR_TELL_PADDING = 4;
 
 /**
+ * The reel-in. Chosen 2026-08-20, see decisions.md.
+ *
+ * design.md section 2 is explicit that resistance reaching zero must not end the
+ * fight instantly: it cuts to a short final run, which is the payoff beat and the
+ * moment the music hard swaps. This is the length of that beat.
+ *
+ * A stub. There is no timed input or mash inside it yet, so all it currently does
+ * is hold the frozen fight on screen for two seconds with the line straining.
+ * Two seconds is the short end of design.md's "a few seconds", chosen because
+ * dead air is what a stub is made of and because task 1.13 plays the fight twenty
+ * times. It gets longer once there is something in it.
+ *
+ * In ticks rather than derived from a per-second rate, for the same reason the
+ * attack durations are: a beat is reasoned about in frames.
+ */
+export const REEL_IN_TICKS = 120;
+
+/**
+ * How the two endings are drawn: one flat wash over the whole screen.
+ *
+ * Grey box, and no text. The 2026-08-19 decisions.md entry puts debug chrome in
+ * the DOM and in-game UI in the canvas, and an ending is in-game UI, so it cannot
+ * be DOM text; canvas text at a 4x nearest-neighbour zoom is what that entry
+ * rejected in the first place. A colour is the whole vocabulary available, so the
+ * two have to be unmistakable at a glance rather than two shades of one idea.
+ *
+ * Named rather than borrowed from the palette above. A wash that means "you won"
+ * must never be the same value as one that means "this is the sky", or retuning
+ * one silently retunes the other.
+ *
+ * The alpha leaves the frozen fight readable underneath, deliberately: the last
+ * thing that happened is the information the player wants, and covering it would
+ * hide the misread they are supposed to be annoyed at themselves about.
+ */
+export const COLOUR_ENDING_LANDED = 0xf2e6c8;
+export const COLOUR_ENDING_ESCAPED = 0x0a0d14;
+export const ENDING_TINT_ALPHA = 0.55;
+
+/**
+ * The tether while the reel-in is running.
+ *
+ * design.md pillar 4 makes the line the identity, and the reel-in is the one beat
+ * that is entirely about it, so the stub is drawn on the line rather than as a
+ * caption. Thicker and in its own colour, so two seconds of a frozen fight reads
+ * as the line under load rather than as the game having hung.
+ *
+ * Kept clear of COLOUR_TELEGRAPH below: that colour means the fish is about to
+ * hurt you, and by the reel-in it can no longer do anything at all.
+ */
+export const COLOUR_REEL_IN_LINE = 0xf2e6c8;
+export const REEL_IN_LINE_WIDTH = 2;
+
+/**
  * The telegraph. Outlined during the wind-up, filled solid while the hitbox is
  * live, absent otherwise.
  *

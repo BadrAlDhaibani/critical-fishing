@@ -13,13 +13,31 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.11, distance bands. Tests, lint, format and build
-  are clean at 188 tests. **Not yet playtested**, so it is not closed: the second
-  gate in CLAUDE.md's definition of done is still open.
-- **In a half state:** nothing in the code. 1.11 is awaiting Badr's playtest.
-- **Next task:** 1.12, win and lose states. Hull to zero loses, resistance to
-  zero wins and enters a stub reel-in sequence. _Context: design.md section 2._
-  1.2c is still open and still not gameplay-blocking.
+- **Last completed task:** 1.12, win and lose states. Tests, lint, format and
+  build are clean at 198 tests. **Not yet playtested**, so it is not closed: the
+  second gate in CLAUDE.md's definition of done is still open.
+- **In a half state:** nothing in the code. **Two playtests are outstanding**,
+  1.11's and 1.12's, and neither task closes until Badr has played it. 1.12 did
+  not touch a single number or line belonging to 1.11, so the 1.11 list below is
+  still exactly what it was.
+- **Next task:** 1.13, tuning pass. Badr plays it twenty times and **only numbers
+  change**. Nothing in that task is fixed with code: if something can only be
+  fixed with code, that is a finding to raise rather than a change to make.
+  _Context: design.md section 8 and the settled numbers below._ 1.2c is still
+  open and still not gameplay-blocking.
+- **What the 1.12 playtest is looking for:**
+  - Losing: four close punishers and everything stops dead, washed dark. The
+    frozen fight should still be readable under the tint. Judge whether stopping
+    dead reads as an ending or as a crash.
+  - Winning: the tether goes thick and pale for two seconds with nothing else
+    moving at all, then the pale wash. **`REEL_IN_TICKS` is the number most
+    likely to be wrong**, because the beat is a stub with nothing inside it yet.
+    Two seconds of a strained line either reads as a final run or as a hang, and
+    only playing it answers that.
+  - `R` restarts, but only once a fight is over. Press it mid-fight and confirm
+    nothing happens.
+  - The readout's new `stage` line, which is also what says whether `ticks` going
+    back to zero was `R` or a page reload.
 - **What the 1.11 playtest is looking for**, before anything is retuned:
   - The `tether` line in the readout now names the band. It should flip to close
     at roughly 75 horizontal from a resting fish and not flip back until roughly
@@ -75,6 +93,39 @@ Update this block at the end of every batch. Keep it to a few lines.
     far resting depth stays at or under `edge - hysteresis`, and the close band
     is horizontally wider than the hitbox at its centre. See decisions.md for
     what breaks if either goes.
+  - Reel-in 120 ticks, two seconds. The one number here that is openly a
+    placeholder: it is the length of a beat with nothing inside it yet, and it
+    gets longer once design.md section 2's timed input or mash exists.
+- **Carried out of 1.12, still true:**
+  - **A fight has four stages** on `FightState.stage`: `fighting`, `reelIn`,
+    `landed`, `escaped`, with `stageTicksRemaining` counting out the only one
+    that has a duration. `landed`/`escaped` rather than `won`/`lost` because
+    those are design.md section 2's own words and phase 4's record book is keyed
+    on that distinction.
+  - **Ending a fight freezes it completely.** `stepFight` guards at the top and
+    `stepEnding` takes over: no input read, nothing moves, the fish does not
+    attack, shots in the air neither travel nor resolve. `stepEnding` **spreads
+    the state instead of naming every field**, which is the opposite of the
+    rebuild rule below and is correct there because nothing simulates. `tick`
+    keeps counting in every stage, so a frozen fight cannot be mistaken for a
+    hung one.
+  - **Both bars emptying on one tick is a win**, because the player's attack is
+    charged against resistance well before the fish's damage reaches the hull. A
+    test pins it. Do not "fix" it into a loss.
+  - **The renderer hides the telegraph and the shots once the fight is over**,
+    rather than the simulation blanking them. The state stays an honest snapshot
+    of what the fish was mid-way through, which is what phase 4 will want.
+  - **Restart is `R`, on `FightControls` but deliberately not on `FightInputs`.**
+    It is the meta layer's job, not the fight's, and `sim/` stays ignorant of it.
+    `FightScene.startFight` rebuilds the driver rather than resetting one, and
+    resets `elapsedMs` alongside it, or the tick-rate average reads as permanent
+    drift.
+  - **One existing test needed the ending, not the other way round.** "spends the
+    pool even when the dash is eaten by a wall" walked RIGHT for 1000 ticks,
+    which since 1.9 walks into the hitbox, so the boat now loses before the dash
+    under test can fire. It uses `quietFish()` now. It is the one test that
+    genuinely needs the _right_ wall, so it cannot take the "send test boats
+    left" advice below.
 - **Carried out of 1.11, still true:**
   - **Bands are cut out of line length, which includes depth**, not out of
     horizontal distance. The fish's own depth therefore moves it between bands.
@@ -241,8 +292,10 @@ Update this block at the end of every batch. Keep it to a few lines.
     concerns: movement, the band and the fish's repositioning, the player's
     attack, the pool, the shots, and the fish's attack. Splitting the boat and
     fish halves into two functions that `stepFight` composes is the obvious move
-    and is a task of its own. It was deliberately not slipped into 1.10 or 1.11
-    and is getting harder to keep out; propose it rather than doing it.
+    and is a task of its own. It was deliberately not slipped into 1.10, 1.11 or
+    1.12 and is getting harder to keep out; propose it rather than doing it. 1.12
+    added a guard clause at the top rather than a seventh concern, so the shape of
+    the split has not changed.
   - The order inside `stepFight` is load bearing and is not obvious from reading
     it. The band is read against the fish's position at the **top** of the tick,
     because repositioning needs a band before it can move; the player's damage is
@@ -321,7 +374,7 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
 - [x] **1.11 Distance bands.** Two bands with hysteresis, fish selects attacks
       by band and repositions with intent.
       _Context: design.md section 3, architecture.md section 4._
-- [ ] **1.12 Win and lose states.** Hull to zero loses. Resistance to zero wins
+- [x] **1.12 Win and lose states.** Hull to zero loses. Resistance to zero wins
       and enters a stub reel-in sequence.
       _Context: design.md section 2._
 - [ ] **1.13 Tuning pass.** Badr plays it twenty times. Adjust numbers only.

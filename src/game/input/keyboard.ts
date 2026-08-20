@@ -21,6 +21,20 @@ export interface FightControls {
   right: Phaser.Input.Keyboard.Key;
   dash: Phaser.Input.Keyboard.Key;
   attack: Phaser.Input.Keyboard.Key;
+  /**
+   * Start a fresh fight once this one is over. Approved 2026-08-20, because task
+   * 1.13 is twenty playthroughs and reloading the page for each of them is not a
+   * reasonable way to spend them.
+   *
+   * Deliberately absent from `FightInputs` below, and the split is the point.
+   * Restarting is not something a boat does inside a fight, it is the meta
+   * layer's job: design.md section 5 has a loss consume the bait, damage the rod
+   * and write a record book entry, none of which the simulation knows about.
+   * Keeping it out of `FightInputs` keeps the phase 7 wire contract to things the
+   * fight actually acts on, and keeps sim/ ignorant of a concept it has no
+   * business holding. `FightScene` reads this key directly.
+   */
+  restart: Phaser.Input.Keyboard.Key;
 }
 
 export function createFightControls(scene: Phaser.Scene): FightControls {
@@ -43,6 +57,10 @@ export function createFightControls(scene: Phaser.Scene): FightControls {
     // finger holds shift. Phaser captures the key by default, which also stops
     // the browser scrolling the page underneath the canvas.
     attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+    // Well away from A, D, shift and space, so a hand still on the controls at
+    // the moment a fight ends cannot fat-finger it. The scene ignores it while a
+    // fight is running for the same reason.
+    restart: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
   };
 }
 

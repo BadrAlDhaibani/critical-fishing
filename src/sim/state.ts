@@ -250,9 +250,42 @@ export interface FishState {
   attackHasHit: boolean;
 }
 
+/**
+ * Which part of a fight's own lifetime the state is in.
+ *
+ * design.md section 2 names three of these. Resistance reaching zero does **not**
+ * end the fight: it cuts to `reelIn`, a short beat that is the payoff and the
+ * moment the music hard swaps later, and only then is the fish `landed`. Hull
+ * reaching zero has no such beat and goes straight to `escaped`.
+ *
+ * `landed` and `escaped` rather than `won` and `lost`, because those are the
+ * words design.md section 2 already uses: you land a fish, and a fish you lost to
+ * goes into the record book as an escape with a silhouette rather than a real
+ * entry. Phase 4's record book is keyed on exactly that distinction, so the
+ * vocabulary should not need translating when it arrives.
+ */
+export type FightStage = 'fighting' | 'reelIn' | 'landed' | 'escaped';
+
 export interface FightState {
   /** Ticks since the fight began. Every duration in the fight counts in these. */
   tick: number;
+  /**
+   * Whether the fight is still being fought, and how it ended if it is not.
+   *
+   * Anything but `fighting` freezes the simulation: `stepFight` stops reading
+   * input, the fish stops attacking and shots in the air stop travelling. See
+   * the guard at the top of sim/fight.ts for why that is a cut rather than a
+   * pause.
+   */
+  stage: FightStage;
+  /**
+   * Ticks left in the reel-in, and 0 in every other stage.
+   *
+   * One counter rather than one per stage, the same way the fish's three attack
+   * phases share `attackPhaseTicksRemaining`: exactly one stage runs at a time,
+   * and only one of them has a duration at all.
+   */
+  stageTicksRemaining: number;
   boat: BoatState;
   fish: FishState;
   /**
@@ -303,6 +336,8 @@ export interface FightInputs {
 export function createFightState(): FightState {
   return {
     tick: 0,
+    stage: 'fighting',
+    stageTicksRemaining: 0,
     boat: {
       x: BOAT_START_X,
       hull: DEFAULT_HULL_MAX,

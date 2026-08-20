@@ -35,6 +35,7 @@ import {
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_SECOND,
   LINE_REGEN_PER_TICK,
+  REEL_IN_TICKS,
 } from '../src/data/config.ts';
 
 const LEFT: FightInputs = { ...noInputs(), moveLeft: true };
@@ -348,7 +349,13 @@ describe('stepFight: dash', () => {
   });
 
   it('spends the pool even when the dash is eaten by a wall', () => {
-    const pinned = hold(createFightState(), RIGHT, 1000);
+    // The one test that genuinely needs the *right* wall, so it cannot take the
+    // handoff block's usual advice and send the boat left. A thousand ticks of
+    // RIGHT parks it in the close punisher's hitbox, and since task 1.12 four
+    // swings end the fight and freeze it, so the dash under test never fired.
+    // `quietFish` is the existing answer to that: it silences the attacking and
+    // leaves everything this test actually measures alone.
+    const pinned = hold(quietFish(), RIGHT, 1000);
     const after = hold(pinned, DASH_RIGHT, DASH_DURATION_TICKS);
 
     expect(after.boat.x).toBe(BOAT_MAX_X);
@@ -514,8 +521,9 @@ describe('stepFight: basic attack', () => {
     expect(attacked.fish.resistance).toBeLessThan(start.fish.resistance);
   });
 
-  // The win state is task 1.12. Until then the fish sits at zero rather than
-  // going negative and dragging the bar backwards.
+  // Still worth pinning after task 1.12 gave zero a meaning. The stage is
+  // decided by asking whether resistance has reached zero, so a bar that could
+  // go negative would be a fight that could be won twice.
   it('clamps resistance at zero rather than going negative', () => {
     const start = createFightState();
     const nearlyLanded: FightState = {
@@ -708,8 +716,9 @@ describe('stepFight: the fish punishes standing close', () => {
     expect(after.boat.hull).toBe(0);
   });
 
-  // The lose state is task 1.12. Until then the hull sits at zero rather than
-  // going negative and dragging its bar backwards, the same as resistance does.
+  // The same as resistance above, and load bearing for the same reason since
+  // task 1.12: reaching zero is what ends the fight, so it has to be reachable
+  // exactly rather than overshot.
   it('clamps the hull at zero rather than going negative', () => {
     const after = hold(overhead({ hull: 1 }), noInputs(), ONE_SWING);
 
@@ -1070,5 +1079,160 @@ describe('boat movement through the fixed timestep', () => {
     expect(driver.previous.boat.x).not.toBe(driver.current.boat.x);
     expect(driver.alpha).toBeGreaterThanOrEqual(0);
     expect(driver.alpha).toBeLessThan(1);
+  });
+});
+
+describe('stepFight: ending the fight', () => {
+  /** Long enough for the fish to wind up and land one close punisher. */
+  const ONE_SWING = 1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS;
+
+  /** Everything held down at once, to prove none of it is being read. */
+  const EVERYTHING: FightInputs = { ...RIGHT, dash: true, attack: true };
+
+  /** A fight one basic attack away from being won. */
+  function nearlyLanded(): FightState {
+    const start = createFightState();
+    return { ...start, fish: { ...start.fish, resistance: 1 } };
+  }
+
+  /** A fight parked in the hitbox with one hull point left to lose. */
+  function nearlyLost(): FightState {
+    const start = createFightState();
+    return { ...start, boat: { ...start.boat, x: start.fish.x, hull: 1 } };
+  }
+
+  it('opens in the fighting stage with nothing to count', () => {
+    const start = createFightState();
+
+    expect(start.stage).toBe('fighting');
+    expect(start.stageTicksRemaining).toBe(0);
+  });
+
+  it('cuts to the reel-in on the tick resistance reaches zero', () => {
+    // design.md section 2 is explicit that the win does not end the fight
+    // instantly. Landing straight from the killing blow would skip the payoff
+    // beat the whole ending is built around.
+    const after = stepFight(nearlyLanded(), ATTACK);
+
+    expect(after.fish.resistance).toBe(0);
+    expect(after.stage).toBe('reelIn');
+    expect(after.stageTicksRemaining).toBe(REEL_IN_TICKS);
+  });
+
+  it('holds the reel-in for exactly its duration and then lands the fish', () => {
+    const won = stepFight(nearlyLanded(), ATTACK);
+
+    const lastTick = hold(won, noInputs(), REEL_IN_TICKS - 1);
+    expect(lastTick.stage).toBe('reelIn');
+    expect(lastTick.stageTicksRemaining).toBe(1);
+
+    const landed = stepFight(lastTick, noInputs());
+    expect(landed.stage).toBe('landed');
+    expect(landed.stageTicksRemaining).toBe(0);
+  });
+
+  it('loses the fight on the tick the hull reaches zero', () => {
+    // No beat on this side. The reel-in is the payoff for winning, and a loss
+    // has nothing to pay off.
+    const after = hold(nearlyLost(), noInputs(), ONE_SWING);
+
+    expect(after.boat.hull).toBe(0);
+    expect(after.stage).toBe('escaped');
+    expect(after.stageTicksRemaining).toBe(0);
+  });
+
+  it('gives the win priority when both bars empty on the same tick', () => {
+    // The tie-break chosen at task 1.12, pinned so it cannot drift. It is not
+    // generosity: the player's attack is charged against resistance well before
+    // the fish's damage reaches the hull, so the killing blow really did land
+    // first and the ending should say what happened.
+    const start = createFightState();
+    const mutual: FightState = {
+      ...start,
+      boat: { ...start.boat, x: start.fish.x, hull: FISH_CLOSE_HULL_DAMAGE },
+      fish: {
+        ...start.fish,
+        resistance: 1,
+        // Seeded mid-swing rather than walked into, because both bars have to
+        // empty on the same tick and walking there would land them a tick apart.
+        band: 'close',
+        attackPhase: 'active',
+        attackKind: 'close',
+        attackPhaseTicksRemaining: FISH_CLOSE_ACTIVE_TICKS,
+      },
+    };
+
+    const after = stepFight(mutual, ATTACK);
+
+    expect(after.boat.hull).toBe(0);
+    expect(after.fish.resistance).toBe(0);
+    expect(after.stage).toBe('reelIn');
+  });
+
+  it('freezes the whole fight once the fish has escaped', () => {
+    const lost = hold(nearlyLost(), noInputs(), ONE_SWING);
+    expect(lost.stage).toBe('escaped');
+
+    const after = hold(lost, EVERYTHING, 300);
+
+    expect(after.stage).toBe('escaped');
+    expect(after.boat).toEqual(lost.boat);
+    expect(after.fish).toEqual(lost.fish);
+    expect(after.projectiles).toEqual(lost.projectiles);
+  });
+
+  it('freezes the whole fight once the fish is landed', () => {
+    const won = stepFight(nearlyLanded(), ATTACK);
+    const landed = hold(won, noInputs(), REEL_IN_TICKS);
+    expect(landed.stage).toBe('landed');
+
+    const after = hold(landed, EVERYTHING, 300);
+
+    expect(after.stage).toBe('landed');
+    expect(after.boat).toEqual(landed.boat);
+    expect(after.fish).toEqual(landed.fish);
+  });
+
+  it('freezes the fight for the whole of the reel-in as well', () => {
+    // "Cut to a short reel-in sequence", not "run one alongside the fight". A
+    // fish still swinging during its own defeat would make the outcome a lie.
+    const won = stepFight(nearlyLanded(), ATTACK);
+    const midway = hold(won, EVERYTHING, REEL_IN_TICKS - 1);
+
+    expect(midway.stage).toBe('reelIn');
+    expect(midway.boat).toEqual(won.boat);
+    expect(midway.fish).toEqual(won.fish);
+  });
+
+  it('leaves shots hanging in the air rather than letting them land', () => {
+    const start = createFightState();
+    const flying: FightState = {
+      ...start,
+      fish: { ...start.fish, resistance: 1 },
+      // Three ticks from the surface and dead on the boat, so it survives the
+      // winning tick and would certainly connect on the next one. Sixty ticks of
+      // frozen fight later it must still be exactly where the win left it.
+      projectiles: [
+        { x: start.boat.x, depth: 3 * FISH_FAR_RISE_PER_TICK, vx: 0 },
+      ],
+    };
+
+    const won = stepFight(flying, ATTACK);
+    expect(won.stage).toBe('reelIn');
+    expect(won.projectiles).toHaveLength(1);
+
+    const after = hold(won, noInputs(), 60);
+
+    expect(after.projectiles).toEqual(won.projectiles);
+    expect(after.boat.hull).toBe(won.boat.hull);
+  });
+
+  it('keeps counting ticks after the fight is over', () => {
+    // A frozen fight whose clock had also stopped would be indistinguishable
+    // from a hung simulation, and the reel-in still has a duration to count out.
+    const lost = hold(nearlyLost(), noInputs(), ONE_SWING);
+    const after = hold(lost, noInputs(), 10);
+
+    expect(after.tick).toBe(lost.tick + 10);
   });
 });

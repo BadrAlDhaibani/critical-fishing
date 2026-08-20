@@ -645,3 +645,86 @@ Nothing about either attack was retuned, deliberately. The far punisher already
 feels different because its flight time comes from the depth it fired from: a
 volley from the resting station is the 84-tick flight of 1.10, and one from a
 risen fish is 42 and much sharper. Judge that before touching its numbers.
+
+---
+
+## 2026-08-20: A fight ends in one of four stages, and ending it freezes it
+
+Task 1.12. `FightState.stage` is `fighting`, `reelIn`, `landed` or `escaped`,
+with `stageTicksRemaining` counting out the only one of them that has a duration.
+
+**`landed` and `escaped` rather than `won` and `lost`**, because those are the
+words design.md section 2 already uses: you land a fish, and a fish you lost to
+goes into the record book as an escape with a silhouette and an estimated weight
+rather than a real entry. Phase 4's record book is keyed on exactly that
+distinction, so the vocabulary should not need translating when it arrives.
+Rejected: `won`/`lost`, which would have had to be mapped onto these two anyway.
+
+**Resistance reaching zero cuts to a 120-tick reel-in, and only then lands the
+fish.** design.md section 2 is explicit that the win must not end the fight
+instantly. Two seconds is the short end of its "a few seconds", chosen because
+the beat is currently a stub with nothing inside it and dead air is all a stub
+has to offer, and because task 1.13 plays the fight twenty times. It gets longer
+once the timed input or mash that belongs in it exists. Hull reaching zero has no
+equivalent beat and goes straight to `escaped`: the reel-in is the payoff for
+winning and a loss has nothing to pay off.
+
+**Ending a fight freezes it completely.** No input is read, the boat does not
+move, the fish does not attack, and shots already in the air neither travel nor
+resolve. design.md section 2 says the win **cuts** to a reel-in rather than
+running one alongside the fight, and the loss has to work the same way: a
+punisher landing on a boat that has already won, or a killing blow landing after
+the hull is gone, would make the outcome a lie about what happened. `stepFight`
+does this with a guard clause at the top, and `stepEnding` spreads the state
+rather than naming every field, which is the exact opposite of what the main body
+must do and is right for the same reason it is wrong there: nothing simulates, so
+the ended state is a frozen snapshot and a second field-by-field rebuild would
+only be a second place for a new field to be dropped. `tick` keeps counting in
+every stage, so a frozen fight cannot be mistaken for a hung one.
+
+**Both bars emptying on the same tick is a win.** Not generosity: it is the order
+`stepFight` already resolves in. The player's attack is charged against
+resistance well before the fish's damage reaches the hull, so the killing blow
+genuinely landed first and the ending should say what happened. Pinned by a test.
+Rejected: the harsher reading where the loss wins, which would have contradicted
+the tick order the rest of the function is careful about.
+
+**The renderer, not the simulation, stops drawing what can no longer act.** The
+telegraph and the shots are hidden once the stage is not `fighting`, rather than
+the simulation blanking the fish's attack fields on the way out. A telegraph is a
+promise that something is about to hurt you and an ended fight cannot keep it,
+but the state stays an honest record of what the fish was in the middle of, which
+is what phase 4's record book will want. Two lines in `FightScene` against a
+mutation in `sim/` that would have thrown information away.
+
+**The endings are drawn as one flat colour wash, and there is no text.** The
+2026-08-19 entry above puts debug chrome in the DOM and in-game UI in the canvas,
+and an ending is in-game UI; canvas text at a 4x nearest-neighbour zoom is what
+that entry rejected in the first place. The alpha leaves the frozen fight
+readable underneath deliberately, because the position the boat died in is the
+information the player wants. The reel-in gets no wash: it draws the tether
+thicker and in its own colour instead, which is design.md pillar 4 and is also
+the only thing moving during those two seconds, without which a frozen fight
+would read as a hang.
+
+## 2026-08-20: Restart is `R`, and it lives in the scene rather than in the sim
+
+Approved during task 1.12, because task 1.13 is twenty playthroughs and reloading
+the page for each of them is not a reasonable way to spend them.
+
+`R`, well clear of A, D, shift and space so a hand still on the controls at the
+moment a fight ends cannot fat-finger it, and **ignored entirely while a fight is
+running** so there is no accidental rage-restart.
+
+It is on `FightControls` but deliberately **not** on `FightInputs`. Restarting is
+not something a boat does inside a fight, it is the meta layer's job: design.md
+section 5 has a loss consume the bait, damage the rod and write a record book
+entry, none of which the simulation knows about. Keeping it out of `FightInputs`
+keeps the phase 7 wire contract to things the fight actually acts on. `FightScene`
+reads the key directly and rebuilds its `FixedStepDriver`, rather than resetting
+one, so `previous` is seeded with the fresh state too and no frame interpolates
+the boat from where the last fight ended to where the next one begins.
+
+One consequence for the 2026-08-19 entry above: the readout's `ticks` dropping to
+zero used to mean only "the page reloaded", and now also means "R was pressed".
+The new `stage` line is what tells the two apart.
