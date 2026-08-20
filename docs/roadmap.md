@@ -12,313 +12,158 @@ genuinely need more mid-task.
 
 Update this block at the end of every batch. Keep it to a few lines.
 
-- **Current phase:** 1, grey box fight
-- **Last completed task:** 1.12, win and lose states. Tests, lint, format and
-  build are clean at 198 tests. **Not yet playtested**, so it is not closed: the
-  second gate in CLAUDE.md's definition of done is still open.
-- **In a half state:** nothing in the code. **Two playtests are outstanding**,
-  1.11's and 1.12's, and neither task closes until Badr has played it. 1.12 did
-  not touch a single number or line belonging to 1.11, so the 1.11 list below is
-  still exactly what it was.
-- **Next task:** 1.13, tuning pass. Badr plays it twenty times and **only numbers
-  change**. Nothing in that task is fixed with code: if something can only be
-  fixed with code, that is a finding to raise rather than a change to make.
-  _Context: design.md section 8 and the settled numbers below._ 1.2c is still
-  open and still not gameplay-blocking.
-- **What the 1.12 playtest is looking for:**
-  - Losing: four close punishers and everything stops dead, washed dark. The
-    frozen fight should still be readable under the tint. Judge whether stopping
-    dead reads as an ending or as a crash.
-  - Winning: the tether goes thick and pale for two seconds with nothing else
-    moving at all, then the pale wash. **`REEL_IN_TICKS` is the number most
-    likely to be wrong**, because the beat is a stub with nothing inside it yet.
-    Two seconds of a strained line either reads as a final run or as a hang, and
-    only playing it answers that.
-  - `R` restarts, but only once a fight is over. Press it mid-fight and confirm
-    nothing happens.
-  - The readout's new `stage` line, which is also what says whether `ticks` going
-    back to zero was `R` or a page reload.
-- **What the 1.11 playtest is looking for**, before anything is retuned:
-  - The `tether` line in the readout now names the band. It should flip to close
-    at roughly 75 horizontal from a resting fish and not flip back until roughly
-    147, and it must not chatter when walking slowly across either edge.
-  - Closing in should read as the fish rising to meet you and then gliding
-    underneath. Walking away must visibly outpace it.
-  - **Judge the volley again before touching one of its numbers.** Flight time is
-    derived from depth, so a volley from the resting station is 1.10's 84-tick
-    flight and one from a risen fish is 42 and much sharper. Nothing about either
-    attack was retuned at 1.11, deliberately.
-  - The close punisher's column must stay put for the whole wind-up.
-- **Where the fish's code lives.** `sim/ai/patterns.ts` runs the attacks and
-  `sim/ai/bands.ts` chooses and repositions, per architecture.md section 2.
-  `sim/distance.ts` owns `bandFor` and its hysteresis. Still hard-coded for one
-  grey box fish: task 3.1 extracts fish into data files, and writing that
-  definition format now is building ahead of the roadmap. The field names already
-  match the architecture.md section 4 sketch so the extraction is a move rather
-  than a rewrite. Nothing has an `id`, a `weight` or a `punishes` yet,
-  deliberately. Two concessions: a local `TIMINGS` record keyed by attack kind,
-  so the phase machine is written once rather than once per attack, and
-  `attackForBand`, which is a one-to-one mapping today and becomes the thing that
-  reads a fish definition's weighted list at 3.1.
-- **Numbers settled so far.** All of these answer parts of design.md section 8
-  and must not be re-invented or quietly retuned outside task 1.13:
-  - Default boat hull 100, default line stamina pool 80, grey box fish
-    resistance 400. Hull and pool are properties of the **boat and line the
-    player has unlocked**, not game constants, which is why the maxima live on
-    `FightState` and `data/config.ts` holds only the default loadout.
-  - Dash: 55 units over 14 ticks, costing 16. Five dashes from a full pool.
-  - Basic attack: costs 8, 20-tick cooldown, 20 damage at 100 units falling to a
-    floor of 6, on a true inverse curve. Ten attacks from a full pool.
-  - Stamina refill: 6 a second, paused for 30 ticks by any spend. Empty to full
-    is 13.3 seconds of not spending.
-  - Close punisher: 45 wind-up, 8 active, 45 recovery, 60 cooldown. 25 hull
-    damage, so four of them end the fight. 60-unit hitbox centred on the fish.
-    Full cycle 158 ticks, 2.6 seconds.
-  - Far punisher: 40 wind-up, 3 shots one every 15 ticks, 30 recovery, 90
-    cooldown. 8 hull damage a shot, 24 for a whole volley. Shots climb at 72 u/s
-    and correct at 36 u/s, 10 units wide. Full cycle 191 ticks, 3.2 seconds.
-    Flight time is **not** a constant: it is the depth the shot was fired from
-    divided by the climb, so it is 84 ticks from the resting station and 42 from
-    a risen fish.
-    Each shot is **lobbed** at where the boat stood when it fired, with the
-    correction on top: tracking alone closes only about 50 units in a flight and
-    could never reach a boat across the lane. The correction staying under the
-    boat's 90 u/s walk is what makes the volley free to dodge on foot, and a test
-    pins that inequality rather than the values.
-  - **The dash grants no invulnerability frames.** Decided at 1.9 and pinned by
-    a test. It buys 55 units of distance and nothing else.
-  - Bands: edge 140 on line length, hysteresis 15, resting depth 100 in the far
-    band and 50 in the close one, swimming 36 u/s and rising 30 u/s. Two
-    inequalities between those are pinned by tests rather than the values: the
-    far resting depth stays at or under `edge - hysteresis`, and the close band
-    is horizontally wider than the hitbox at its centre. See decisions.md for
-    what breaks if either goes.
-  - Reel-in 120 ticks, two seconds. The one number here that is openly a
-    placeholder: it is the length of a beat with nothing inside it yet, and it
-    gets longer once design.md section 2's timed input or mash exists.
-- **Carried out of 1.12, still true:**
-  - **A fight has four stages** on `FightState.stage`: `fighting`, `reelIn`,
-    `landed`, `escaped`, with `stageTicksRemaining` counting out the only one
-    that has a duration. `landed`/`escaped` rather than `won`/`lost` because
-    those are design.md section 2's own words and phase 4's record book is keyed
-    on that distinction.
-  - **Ending a fight freezes it completely.** `stepFight` guards at the top and
-    `stepEnding` takes over: no input read, nothing moves, the fish does not
-    attack, shots in the air neither travel nor resolve. `stepEnding` **spreads
-    the state instead of naming every field**, which is the opposite of the
-    rebuild rule below and is correct there because nothing simulates. `tick`
-    keeps counting in every stage, so a frozen fight cannot be mistaken for a
-    hung one.
-  - **Both bars emptying on one tick is a win**, because the player's attack is
-    charged against resistance well before the fish's damage reaches the hull. A
-    test pins it. Do not "fix" it into a loss.
-  - **The renderer hides the telegraph and the shots once the fight is over**,
-    rather than the simulation blanking them. The state stays an honest snapshot
-    of what the fish was mid-way through, which is what phase 4 will want.
-  - **Restart is `R`, on `FightControls` but deliberately not on `FightInputs`.**
-    It is the meta layer's job, not the fight's, and `sim/` stays ignorant of it.
-    `FightScene.startFight` rebuilds the driver rather than resetting one, and
-    resets `elapsedMs` alongside it, or the tick-rate average reads as permanent
-    drift.
-  - **One existing test needed the ending, not the other way round.** "spends the
-    pool even when the dash is eaten by a wall" walked RIGHT for 1000 ticks,
-    which since 1.9 walks into the hitbox, so the boat now loses before the dash
-    under test can fire. It uses `quietFish()` now. It is the one test that
-    genuinely needs the _right_ wall, so it cannot take the "send test boats
-    left" advice below.
-- **Carried out of 1.11, still true:**
-  - **Bands are cut out of line length, which includes depth**, not out of
-    horizontal distance. The fish's own depth therefore moves it between bands.
-    Do not "simplify" it to `Math.abs`; decisions.md records what that costs.
-  - **`band` is the only part of the fight's geometry stored on the state.**
-    Everything else is derived on demand. It is stored because hysteresis means
-    the answer depends on the previous answer, and `createFightState` **seeds**
-    it rather than computing it, because the opening line of 141 sits inside the
-    margin where `bandFor` has nothing of its own to say.
-  - **The band picks which attack, the hitbox still picks whether.**
-    `closePunisherHits` doubles as the close punisher's commit test exactly as it
-    did at 1.9. In the close band with the boat out of the box the fish commits
-    to nothing and swims instead, and its cooldown is **held at zero rather than
-    reloaded** so patience costs it nothing and it swings the tick it arrives.
-    `farPunisherFires` is gone.
-  - **The fish repositions only while idle.** Frozen through wind-up, active and
-    recovery. Not the commitment rule, a choice on top of it, and decisions.md
-    gives the two reasons. design.md section 3's "rises while winding up
-    something slow" is deliberately deferred to an attack designed around it.
-  - **It closes on the boat in the close band and holds station in the far one.**
-    Holding station is deliberate: the volley already reaches the whole lane.
-  - **`FISH_START_DEPTH` is `FISH_FAR_BAND_DEPTH`**, so the fish opens the fight
-    at the resting station of the band it opens in and nothing drifts on tick
-    one. Several tests depend on that, including `quietFish()` below.
-  - Nothing clamps the fish to the lane and nothing needs to: it only ever moves
-    towards the boat's x and never past it, and the boat is already clamped.
-- **Carried out of 1.10, still true:**
-  - **There is nowhere on the lane the fish ignores you.** 1.10 made the two
-    triggers exact opposites; 1.11 replaced them with bands that still cover the
-    lane between them. The one position that commits no attack is the close band
-    outside the hitbox, and the fish spends it swimming at you, so it is not
-    quiet either. `tests/fight.test.ts` has a `quietFish()` helper that seeds a
-    cooldown the fish will not finish; use it for anything measuring the boat's
-    own resources. Since 1.11 it silences the **attacking** only: a quiet fish
-    still repositions, so it holds still only while the boat stays in the far
-    band. Send test boats left.
-  - **One phase machine, one cooldown, plus `fish.attackKind`.** Both attacks run
-    through the same `stepFishAttack`, and the cooldown loaded when a recovery
-    ends belongs to the attack that just ran. A non-idle phase with a null kind
-    throws rather than defaulting, because a silent fallback would be the fish
-    quietly running the wrong attack for a second and a half.
-  - **Shots are entities, not part of the attack.** `FightState.projectiles`,
-    stepped by `stepProjectiles` before the fish moves, so the boat x they
-    resolve against is the one this tick already produced. The fish goes idle
-    with its volley still climbing, deliberately: at greater depth that means a
-    close punisher can start underneath its own shots, which the test seeds by
-    hand because it is not reachable from the opening position (recovery plus
-    cooldown is 120 ticks against an 84-tick flight).
-  - **Flight time is derived from depth**, `shotFlightTicks`, which is why 1.11
-    changed the attack's whole feel without retuning it. A deep fish telegraphs
-    further ahead and lobs shots that travel longer, which is also the case where
-    shots outlive the cooldown.
-  - The far punisher's tell is an outline **on the fish**, not a column, because
-    it owns no column of water. Deliberately a different shape from the close
-    punisher's box rather than a variation on it: the two ask for opposite
-    movements and must not be read for one another. It stays up through the
-    active phase, since the volley is still being fired during it.
-  - Shots are drawn **without interpolation**, from `driver.current`, because the
-    list changes length as they resolve and index-matching two ticks would smear
-    a shot that just landed into one just fired. Judged fine at the 1.10
-    playtest: at 1.2 units a tick it does not read as stutter. If a later change
-    speeds the shots up, look at this again.
-  - The readout shows `far:windUp 12` style labels, a `shots` count and, since
-    1.11, the band next to the tether.
-- **Carried out of 1.9, still true:**
-  - `CLOSE_PUNISHER_REACH` is **derived**, half the hitbox plus half the hull,
-    because the box catches an overlapping boat rather than only a boat whose
-    centre is inside it. Do not turn it into a third tunable.
-  - The wind-up branch **does not read the boat at all**, for either attack, and
-    must not start. That is design.md section 3's commitment rule expressed as
-    code rather than as a comment, and four tests assert it now.
-  - The hitbox is re-tested on **every** active tick, with `attackHasHit`
-    keeping it to one hit per swing. A boat that dashes into a box drawn solid
-    on screen has to be hit by it, or the drawing is a lie.
-  - The `Pick<>`-in, patch-out convention that `stepClosePunisher` introduced is
-    now **promoted to patterns.md**, on its third and fourth uses at 1.10.
-    `stepClosePunisher` itself is gone: 1.10 replaced it with `stepFishAttack`,
-    which serves both attacks.
-  - **Tests that walk the boat rightwards now walk it into the hitbox.** The
-    boat starts at 240 and the fish sits at 340, so anything holding `RIGHT`
-    for more than about 39 ticks is inside the box and taking hull damage. Two
-    purity tests moved to `LEFT` for this reason, one of which had been passing
-    only by coincidence. If a test needs the boat far from the fish for a long
-    run, send it left. Since 1.11 that is truer still: about 17 ticks of `RIGHT`
-    is enough to pull the fish into the close band, after which it rises and
-    starts closing, and a test that wanted a fish standing still no longer has
-    one.
-  - The old "leaves the hull alone entirely, since nothing damages it yet" test
-    is gone. Its 1.9 replacement held the boat away from the fish, and 1.10
-    retired that too: see `quietFish()` above.
-  - The telegraph is `game/render/telegraph.ts`, told a phase, an attack kind and
-    a position. The close punisher's column is an outline while winding up, solid
-    while active, hidden otherwise. **Recovery deliberately draws nothing**: reading the recovery and
-    choosing to close is the punish, and marking it would do that for the
-    player. The debug readout names the phase instead, which is a tuning tool
-    and goes away with the rest of the readout.
-  - The readout's `fish` line shows the cooldown while idle and the phase's own
-    counter otherwise, because the phase counter is zero while idle and would
-    say nothing.
-- **Carried out of 1.8, still true:**
-  - **The attack cooldown is 20 ticks and the refill pause is 30, so attacking
-    at full cadence means the pool never refills at all.** That is the whole
-    point of the pause, and 1.9 is what now exploits it: the close punisher's
-    recovery and cooldown give 105 ticks of safety, about five attacks and 40
-    stamina, during which the refill never runs. The player has to disengage to
-    recover. If any of those numbers move, check the inequality still holds
-    before anything else.
-  - The pool is **fractional** now, since the rate is per tick. Nothing rounds
-    it, because costs are checked against the real number; the readout floors
-    it so it can never claim an attack is affordable a tick before the
-    simulation refuses it. Tests on the pool need `toBeCloseTo`.
-  - How much was spent **cannot be read off the final pool** any more. Four
-    tests moved to a `lowestLine` helper in `tests/fight.test.ts` that returns
-    the floor the pool reached over a run of ticks. Use it rather than
-    reintroducing exact end-state arithmetic.
-  - The damage curve's `k` is **derived from the anchors** in `sim/damage.ts`,
-    so retuning the damage cannot leave the curve behind. Do not split it out
-    into a third tunable. Damage is rounded to a whole number inside the curve,
-    which is why the readout and the resistance always agree.
-  - `stepFight` rebuilds **both** `boat` and `fish` from scratch every tick, so
-    every new field has to be named there or it vanishes after one tick. Both
-    are guarded by a test. The fish stopped being carried by reference at 1.7,
-    earlier than this block used to predict, because the attack writes to it.
-  - The dash is **committed**: direction locks at the press, steering and
-    reversal are ignored for all 14 ticks, and no second dash can start until
-    it ends. This mirrors the fish's non-cancellable wind-up in design.md
-    section 3, and a test asserts it. Do not "improve" it into steerable.
-  - Both the dash and the attack are **edge-triggered inside `sim/`**, not in
-    the input layer. `FightInputs` carries raw held state and `boat.dashHeld` /
-    `boat.attackHeld` carry the previous tick. Done this way because a phase 7
-    server cannot trust a client's "pressed this frame".
-  - An action that cannot be paid for **in full** does not fire at all, for both
-    the dash and the attack, and a dash eaten by a wall is still charged. All
-    deliberate, all tested.
-  - Attacking during a dash is allowed. The shared pool is the only limiter.
-  - The debug readout shows `hull`, `stam` and `resist` as `current/max`, `dmg`
-    as what the next attack would deal from where the boat is standing, and
-    `tether` for the line's length, which is a different thing from `stam`. If
-    a bar refills during a playtest, check `ticks`: a reset means the page
-    reloaded, not that the simulation did it. This cost a diagnosis once.
-  - Two conventions are at **two uses** each and get promoted to patterns.md on
-    the third: edge-triggering a press inside `sim/` from a held flag, and
-    refusing an action outright rather than part-charging it.
-  - Bars are game objects inside the pixel grid, not DOM. `game/render/bars.ts`
-    draws them; the pure fill maths is in `game/render/barGeometry.ts` so it can
-    be tested without Phaser. Any value above zero draws at least 1 unit, so a
-    living boat never shows an empty bar. The DOM debug readout sits bottom left
-    because at 4x the top left is now the hull and line bars.
-  - `tests/distance.test.ts` builds its boats and fish by spreading a real
-    `createFightState()`, and `tests/fight.test.ts` builds its input literals by
-    spreading `noInputs()`, so growing either type does not break them again.
-  - Line length is euclidean and includes depth, and lives in `sim/distance.ts`
-    as `lineLength(boat, fish)`, which takes only the fields it reads so callers
-    can measure from a position they have not built a state around yet. Derived
-    on demand, never stored on `FightState`. See decisions.md, which also
-    records why horizontal-only was rejected: do not "simplify" it back to
-    `Math.abs`. Note that `boat.line`, the stamina pool, is a different thing
-    entirely from the tether whose length this measures. design.md calls both
-    "line".
-  - Fish depth is units below the waterline, not a screen y. `sim/` never sees
-    `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
-- **Noticed but not acted on:**
-  - `stepFight` now names eighteen fields plus a list, and reads as six stacked
-    concerns: movement, the band and the fish's repositioning, the player's
-    attack, the pool, the shots, and the fish's attack. Splitting the boat and
-    fish halves into two functions that `stepFight` composes is the obvious move
-    and is a task of its own. It was deliberately not slipped into 1.10, 1.11 or
-    1.12 and is getting harder to keep out; propose it rather than doing it. 1.12
-    added a guard clause at the top rather than a seventh concern, so the shape of
-    the split has not changed.
-  - The order inside `stepFight` is load bearing and is not obvious from reading
-    it. The band is read against the fish's position at the **top** of the tick,
-    because repositioning needs a band before it can move; the player's damage is
-    then priced against the position the fish has **just** moved to, so both
-    sides of the line are this tick's. The difference is under a unit either way,
-    but several tests are exact about it.
-  - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
-    readings still have not been taken**, so the diagnosis has not started.
-    Cheapest to grab during any future playtest: `devicePixelRatio`,
-    `innerWidth`, `innerHeight` while in F11.
-  - `FixedStepDriver` is not generic over an input type; `FightScene` threads
-    inputs in through a closure and samples them once per frame. Fine now, but
-    the server in phase 7 will likely want `advance(frameMs, inputs)`. Deferred
-    deliberately rather than churn eight call sites in `loop.test.ts`.
-  - architecture.md section 2 does not list `sim/loop.ts`, which now exists, and
-    its `step(state, inputs, dt)` sketch should drop the `dt`, since section 3
-    fixes the timestep and one call is exactly one tick. Two one-line edits
-    proposed, both waiting on a yes. Firm tier, do not write them unprompted.
-  - `npm run format` reformats `docs/design.md` and `CLAUDE.md`, repadding their
+- **Current phase:** 2, game feel, still rectangles.
+- **Last completed task:** 1.13, the tuning pass, in two rounds. **Phase 1 is
+  complete apart from 1.2c**, which is still open and still not
+  gameplay-blocking.
+- **Next task:** 2.1, hit stop. _Context: design.md section 6._
+- **Phase 1 exited without its twenty-fight exit test.** Badr's deliberate call,
+  recorded in decisions.md 2026-08-20. It matters going into phase 2 because
+  design.md section 6 says hit stop, shake and flash **hide bad timing**, and 2.1
+  to 2.3 add all three. If the fight starts reading as unfair or mushy, suspect
+  the phase 1 tuning before the effects layer, and see `GAME_PACE` below.
+- **In a half state:** nothing.
+
+### Read this before touching any number
+
+**`GAME_PACE` in `data/config.ts` is 1.25, and every number in the fight now has
+an authored form and an effective one.** Speeds are wrapped in `atPace` and scale
+up; tick durations are wrapped in `ticksAtPace` and scale down; distances, costs,
+damage and pools are never paced. One knob sets the whole game's tempo.
+
+Consequences you need before reading anything else in that file:
+
+- **Prose in `config.ts` quotes the authored numbers**, the ones written inside
+  the call. Divide any wall-clock time it quotes by `GAME_PACE`. Ratios between
+  two paced values are unchanged; distances are exact as written.
+- `ticksAtPace(34)` still records that the telegraph was *designed* as 34 ticks.
+  Do not collapse the two by replacing it with 27 — that loses the reasoning and
+  the pace axis at once.
+- Changing `GAME_PACE` is a real gameplay change even though it touches no
+  geometry: reaction time does not scale. 1.25 turns a 567 ms tell into 450 ms.
+
+### Numbers settled so far
+
+All **authored** values; effective values are these through `GAME_PACE` 1.25.
+These answer parts of design.md section 8 and must not be quietly re-invented.
+
+- Default boat hull 100, default line pool 80, grey box fish resistance 400.
+  Hull and pool belong to the **boat and line the player has unlocked**, not to
+  the game, which is why the maxima live on `FightState` and `data/config.ts`
+  holds only the default loadout.
+- Boat walks 90 u/s. Dash 55 units over 14 ticks, costing 16. Five dashes from a
+  full pool.
+- Basic attack: costs 8, 20-tick cooldown, 20 damage at 100 units falling to a
+  floor of 6 on a true inverse curve. Ten attacks from a full pool.
+- Stamina refill 6 a second, paused 30 ticks by any spend.
+- Close punisher: 34 wind-up, 8 active, 45 recovery, 40 cooldown, 25 hull damage,
+  60-unit hitbox centred on the fish. Four of them end a fight.
+- Far punisher: 40 wind-up, 3 shots one every 15 ticks, 30 recovery, 90 cooldown,
+  8 hull damage a shot. Shots climb 96 u/s, correct at 48 u/s, 10 units wide.
+  Flight time is **derived from the depth fired from**, not a constant.
+- Bands: edge 140 on **line length**, hysteresis 15, resting depth 100 far and 50
+  close, swimming 42 u/s, rising 30 u/s.
+- Reel-in 120 ticks. Openly a placeholder: it is a beat with nothing in it, and
+  it gets longer once design.md section 2's timed input or mash exists.
+- **The dash grants no invulnerability frames.** Pinned by a test.
+
+### Invariants a retune can break silently
+
+Most are pinned by tests and will fail the suite. These three are the traps.
+
+1. **The close band's width comes from `EDGE − HYSTERESIS`, not `EDGE`.** The
+   fish cannot be made deeper unless `FISH_BAND_EDGE` moves with it — at the
+   current edge, depth is capped at 117, and deepening *shrinks* the close band.
+   Depth 125 pairs with edge 160. See decisions.md 2026-08-20.
+2. **Swim speed is capped near 47 by the lane width**, not by the pinned
+   `FISH_SWIM < BOAT_SPEED` inequality, which only holds in an unbounded lane.
+   Above that the fish corners a fleeing boat against a wall permanently.
+3. **Two load-bearing inequalities have no tests at all:**
+   `ATTACK_COOLDOWN_TICKS < LINE_REGEN_DELAY_TICKS` (attacking at full cadence
+   must stop the refill entirely — the exchange the fight is built on) and
+   `DASH_DURATION_TICKS < LINE_REGEN_DELAY_TICKS`.
+
+### Where the fight lives
+
+`sim/fight.ts` steps everything; `sim/ai/patterns.ts` runs the attacks and
+`sim/ai/bands.ts` chooses and repositions; `sim/distance.ts` owns `lineLength`
+and `bandFor` with its hysteresis. Per architecture.md section 2, and `sim/`
+imports nothing from Phaser.
+
+Still hard-coded for one grey box fish. Task 3.1 extracts fish into data files,
+and writing that format now is building ahead. Field names already match the
+architecture.md section 4 sketch, so it is a move rather than a rewrite. Nothing
+has an `id`, a `weight` or a `punishes` yet, deliberately.
+
+The order inside `stepFight` is load bearing and not obvious: the band is read
+against the fish's position at the **top** of the tick, because repositioning
+needs a band first; the player's damage is then priced against the position the
+fish has **just** moved to. Several tests are exact about it.
+
+`stepFight` rebuilds **both** `boat` and `fish` from scratch every tick, so every
+new field has to be named there or it vanishes after one tick. Both are guarded
+by a test. Ending a fight freezes it completely: `stepFight` guards at the top and
+`stepEnding` spreads the state instead of naming fields, which is correct there
+precisely because nothing simulates.
+
+### Open findings, none of them started
+
+1. **The player's attack has no on-screen representation at all.**
+   `basicAttackDamage` feeds only the debug readout, and nothing on `FightState`
+   records that an attack fired or landed, so this needs a **sim field**, not
+   just a renderer change. Badr asked for it; it belongs to **2.3**, with phase
+   8.2 owning the line-effect version. Note the asymmetry meanwhile: both fish
+   attacks are telegraphed and its shots are drawn, the player's attack is not.
+2. **A second attack in the close band**, the structural fix for close camping
+   that round 1 could only narrow with numbers. Makes the grey box fish an
+   "uncommon" under design.md section 3's rarity ladder, so it needs a design yes
+   and it builds task 3.1's weighted-list machinery.
+3. **Weighted attack selection is already the design.** design.md section 3 gives
+   each band "a small weighted list", so varied attack choice is on-design, not a
+   change to it. The boundary that matters: design.md forbids random
+   **positioning** and permits weighted random **attack choice**. Lands in
+   `attackForBand`, task 3.1.
+4. **Depth variety beyond two resting stations.** design.md section 3 already
+   names "drifts shallow when low on resistance". Phase 3.
+5. **`stepFight` reads as six stacked concerns** and names eighteen fields plus a
+   list. Splitting the boat and fish halves into two composed functions is the
+   obvious move and has been kept out of 1.10 through 1.13 deliberately. Propose
+   it as its own task rather than slipping it in.
+6. **Shots are drawn without interpolation**, from `driver.current`, because the
+   list changes length as they resolve. Judged fine at 1.10 and again at 1.13
+   round 2, but they have gone from 1.2 to 2.0 units a tick since that judgement
+   was made. Look again if they speed up further.
+7. Task **1.2c**: fullscreen zoom reads `3x` where `4x` is expected. **The
+   console readings still have not been taken** and the diagnosis cannot start
+   without them: `devicePixelRatio`, `innerWidth`, `innerHeight` while in F11.
+   Cheapest to grab during any future playtest.
+8. `FixedStepDriver` is not generic over an input type; `FightScene` threads
+   inputs in through a closure. The phase 7 server will likely want
+   `advance(frameMs, inputs)`. Deferred rather than churn eight call sites.
+9. architecture.md section 2 does not list `sim/loop.ts`, which exists, and its
+   `step(state, inputs, dt)` sketch should drop the `dt` since one call is
+   exactly one tick. Two one-line edits proposed, both **still waiting on a yes**.
+   Firm tier, do not write them unprompted.
+10. `npm run format` reformats `docs/design.md` and `CLAUDE.md`, repadding their
     markdown tables. Whitespace only, but design.md is Locked tier, so the
     reformat gets reverted by hand each time. A `.prettierignore` covering both
     would settle it. Not done, since it changes tooling config.
-  - Phaser pinned at `^3.90.0`; npm `latest` is 4.2.1. Stack decision not made.
+11. Phaser pinned at `^3.90.0`; npm `latest` is 4.2.1. Stack decision not made.
+
+### Testing notes worth keeping
+
+- `tests/fight.test.ts` has a `quietFish()` helper that seeds a cooldown the fish
+  will not finish. Use it for anything measuring the boat's own resources. It
+  silences **attacking** only: a quiet fish still repositions.
+- **Tests that walk the boat rightwards walk it into the hitbox.** The boat
+  starts at 240 and the fish at 340. If a test needs the boat far from the fish
+  for a long run, **send it left**.
+- Tests build boats and fish by spreading a real `createFightState()`, and input
+  literals by spreading `noInputs()`, so growing either type does not break them.
+- The pool is fractional, so tests on it need `toBeCloseTo`, and how much was
+  spent cannot be read off the final pool. Use the `lowestLine` helper.
+- The suite derives from `config.ts` rather than hard-coding ticks, which is why
+  all 198 tests survived `GAME_PACE` with no edits. Keep it that way.
 
 ---
 
@@ -377,7 +222,9 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
 - [x] **1.12 Win and lose states.** Hull to zero loses. Resistance to zero wins
       and enters a stub reel-in sequence.
       _Context: design.md section 2._
-- [ ] **1.13 Tuning pass.** Badr plays it twenty times. Adjust numbers only.
+- [x] **1.13 Tuning pass.** Two rounds: difficulty, then a global pace control.
+      Closed 2026-08-20 **without** the twenty-fight exit test below, which is
+      Badr's deliberate call and is recorded in decisions.md.
 
 **Phase 1 exit test:** play twenty losses in a row and watch your own reaction.
 Annoyed at yourself means the fight works. Annoyed at the game means telegraphs

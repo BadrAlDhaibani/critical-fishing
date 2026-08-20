@@ -728,3 +728,103 @@ the boat from where the last fight ended to where the next one begins.
 One consequence for the 2026-08-19 entry above: the readout's `ticks` dropping to
 zero used to mean only "the page reloaded", and now also means "R was pressed".
 The new `stage` line is what tells the two apart.
+
+## 2026-08-20: The 1.13 tuning pass, round 1 — the close-camping cheese
+
+The first playtest of the assembled fight. The mechanics were confirmed good
+("very fluid"), and the fight was reported as "kinda easy". The easiness turned
+out not to be a difficulty-scaling question at all.
+
+**The close band held exactly one attack.** Its 45-tick wind-up ran against a
+28-tick walk-out, so there were 17 ticks of free slack: the close punisher was
+dodgeable on foot, every time, without spending anything. Recovery plus cooldown
+then handed back **105 ticks of guaranteed safety, in the highest-damage position
+in the fight**. Camping close was therefore simultaneously the safest and the
+strongest option, which inverts design.md section 2's central tradeoff — the
+pillar the whole game rests on. Not a common fish being appropriately gentle: the
+baseline fight was solvable.
+
+Numbers moved, against Badr's words: close wind-up 45→34 (slack 17 ticks→6),
+close cooldown 60→40 (safety 105→85), swim 36→42 ("fish could be faster"), shot
+climb 72→96 and tracking 36→48 ("projectiles could be faster"). Hull damage
+deliberately **not** raised despite being asked for, so that hit frequency and
+hit severity did not move in the same round and make each other unreadable.
+
+Two discoveries here are worth more than the numbers, and both cost a wrong
+attempt first.
+
+**The close band's width is cut from `EDGE − HYSTERESIS`, not `EDGE`.** Depth
+100→125 was tried, on the reasoning that the pinned `depth ≤ edge − hysteresis`
+test allowed exactly 125. It does — but only degenerately. Entering the close
+band needs a line shorter than 125, and a boat directly above a fish at depth 125
+is exactly 125 away, so the close band became **zero units wide** and the fish
+could never be pulled into close range again. The binding constraint is the other
+test, the one comparing band width against `CLOSE_PUNISHER_REACH`, which caps
+depth at **117** at the current edge. Deepening also *shrinks* the close band
+horizontally (75 units at depth 100, 49 at depth 115), so it makes the fight
+easier, not harder. **The fish cannot go deeper unless `FISH_BAND_EDGE` goes with
+it**; depth 125 pairs with edge 160 and preserves today's geometry exactly.
+Reverted to 100 for now.
+
+**Swim speed is capped near 47 by the lane, not by the pinned inequality.**
+`FISH_SWIM < BOAT_SPEED` guarantees the boat breaks contact only in an
+*unbounded* lane. Ours is 480 units and the boat is clamped to it. At 54 a boat
+fleeing from directly above the fish reaches the wall with a 143-unit gap when
+146.7 is needed for the band to flip back to far — so the fish closes the
+remainder and parks on the cornered boat permanently, which is exactly the trap
+the 2026-08-20 bands entry rules out. Settled at **42**, about 20 ticks of
+margin. The lesson generalises: a ratio between two speeds is not a safety
+property when one of them runs out of room.
+
+## 2026-08-20: GAME_PACE, one knob for the whole fight's clock
+
+Approved at 1.13 round 2, on "I want everything to just be faster... more
+stimulating". Set to **1.25**.
+
+Speeds scale up through `atPace`, durations scale down through `ticksAtPace`, and
+**every distance, cost, damage and pool is left exactly alone**. That combination
+is time dilation rather than a rebalance: the boat covers the same ground during
+a wind-up, the hitbox is still cleared in the same number of units, and every
+guardrail in the fight is a ratio between two quantities that scale together, so
+all nine survive by construction. All 198 tests passed with no edits at all,
+because they derive from the constants rather than hard-coding tick counts.
+
+Authored values stay written as themselves. `ticksAtPace(34)` still records that
+this telegraph was designed as 34 ticks, so pace is an axis independent of
+tuning, and one number changes the whole game's tempo instead of eighteen.
+**Reading convention for `config.ts`:** prose quotes the authored numbers; divide
+any quoted wall-clock time by `GAME_PACE`. Ratios between paced values are
+unchanged, and distances are never paced, so every "clears the hitbox in N units"
+claim is exact as written.
+
+**It is not difficulty-neutral, and that is the catch.** Reaction time does not
+scale with the simulation: a 34-tick tell that was 567 ms is 450 ms at 1.25, and
+the slack for walking clear of the close punisher falls from 100 ms to 77 ms. The
+geometry is untouched and the clock is not.
+
+Rejected: **raising `TICK_HZ`**, which would compress tick-authored durations but
+leave per-second rates alone, so it is not uniform, and it is an architecture
+change rather than a number. And **scaling speeds without durations**, which is
+more frantic but moves every geometric relationship and would have undone round
+1's tuning the day it landed.
+
+Fight length was allowed to fall from roughly 60–90 seconds to roughly 48–72
+rather than raising `FISH_RESISTANCE_MAX` to compensate, on the grounds that a
+longer fast fight reads as padded.
+
+## 2026-08-20: Phase 1 closed without its twenty-fight exit test
+
+Badr's call, made knowingly after the alternative was put to him.
+
+Neither the roadmap's phase 1 exit test ("play twenty losses in a row and watch
+your own reaction") nor task 1.13's own "Badr plays it twenty times" actually
+ran. The fight was sampled across a handful of sessions instead, and two rounds
+of retuning were accepted on that basis — the second of which stacked a pace
+change on top of a difficulty change that had never been played on its own.
+
+Recorded here so a later session reads this as a decision rather than an
+oversight, and so the consequence is written down rather than rediscovered:
+design.md section 6 warns that hit stop, screen shake and hit flash **hide bad
+timing**, and phase 2 adds all three. If the fight later reads as unfair or as
+mushy, the phase 1 tuning is the first suspect and not the effects layer, and
+`GAME_PACE` is a single number to back off before anything else is touched.

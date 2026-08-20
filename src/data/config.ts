@@ -15,6 +15,49 @@ export const INTERNAL_WIDTH = 480;
 export const INTERNAL_HEIGHT = 270;
 
 /**
+ * Global pace. Chosen 2026-08-20 at the 1.13 tuning pass, see decisions.md.
+ *
+ * One knob for how fast the whole fight runs. Speeds scale **up** with it and
+ * durations scale **down**, while every distance, cost, damage and pool stays
+ * exactly where it is. That combination is time dilation rather than a rebalance:
+ * the boat still covers the same ground during a wind-up, the hitbox is still
+ * cleared by the same number of units, and every inequality below is a ratio
+ * between two things that scale together, so all of them survive by
+ * construction.
+ *
+ * What it is not is difficulty-neutral. Reaction time does not scale, so a
+ * 34-tick tell that was 567ms is 450ms at 1.25. The geometry is untouched and the
+ * clock is not, which is exactly the "faster, more stimulating" this was asked
+ * for, but if the fight starts reading as unfair this is the first number to
+ * suspect.
+ *
+ * The authored values below stay written as themselves, so `ticksAtPace(34)`
+ * still records that this telegraph was designed as 34 ticks. Pace is a separate
+ * axis from tuning, and collapsing the two would lose the reasoning.
+ *
+ * **Reading convention for everything below.** Prose in this file quotes the
+ * **authored** numbers, which are the ones written in the call and the ones the
+ * design reasoning is about. Anything wrapped in `atPace` or `ticksAtPace` is
+ * that number at pace 1.0, and the effective value is scaled. Where a comment
+ * quotes a wall-clock time, divide it by GAME_PACE. The two exceptions worth
+ * knowing are that ratios between two paced values are unchanged (the fish still
+ * swims at 47% of the boat's speed, the dash is still 2.67x walking), and
+ * distances are never paced at all, so every "clears the hitbox in N units"
+ * claim is exact as written.
+ */
+export const GAME_PACE = 1.25;
+
+/** A speed in units per second, scaled by the global pace. */
+const atPace = (unitsPerSecond: number): number => unitsPerSecond * GAME_PACE;
+
+/**
+ * A duration in ticks, scaled by the global pace. Rounded, because a tick count
+ * has to be whole: at 1.25 that costs the close punisher's wind-up a fifth of a
+ * tick, which is the one place the dilation is not quite exact.
+ */
+const ticksAtPace = (ticks: number): number => Math.round(ticks / GAME_PACE);
+
+/**
  * Y of the water surface, where the boat sits. Everything below is water.
  *
  * Confirmed by playtest 2026-08-19. The 70 units of sky are not waste: the fish
@@ -66,7 +109,7 @@ export const COLOUR_BAR_RESISTANCE = 0xbf4f4f;
  * Authored per second because that is how it gets reasoned about while tuning.
  * The per-tick value is derived from TICK_HZ so the two can never disagree.
  */
-export const BOAT_SPEED_PER_SECOND = 90;
+export const BOAT_SPEED_PER_SECOND = atPace(90);
 export const BOAT_SPEED_PER_TICK = BOAT_SPEED_PER_SECOND / TICK_HZ;
 
 /**
@@ -86,7 +129,7 @@ export const BOAT_SPEED_PER_TICK = BOAT_SPEED_PER_SECOND / TICK_HZ;
  * total travelled is exactly DASH_DISTANCE.
  */
 export const DASH_DISTANCE = 55;
-export const DASH_DURATION_TICKS = 14;
+export const DASH_DURATION_TICKS = ticksAtPace(14);
 export const DASH_SPEED_PER_TICK = DASH_DISTANCE / DASH_DURATION_TICKS;
 
 /**
@@ -113,7 +156,7 @@ export const DASH_LINE_COST = 16;
  * fish through once it starts attacking at 1.9.
  */
 export const ATTACK_LINE_COST = 8;
-export const ATTACK_COOLDOWN_TICKS = 20;
+export const ATTACK_COOLDOWN_TICKS = ticksAtPace(20);
 
 /**
  * Stamina regeneration. Chosen 2026-08-19, see decisions.md.
@@ -134,9 +177,9 @@ export const ATTACK_COOLDOWN_TICKS = 20;
  *
  * Authored per second, per-tick derived from TICK_HZ, same as the boat's speed.
  */
-export const LINE_REGEN_PER_SECOND = 6;
+export const LINE_REGEN_PER_SECOND = atPace(6);
 export const LINE_REGEN_PER_TICK = LINE_REGEN_PER_SECOND / TICK_HZ;
-export const LINE_REGEN_DELAY_TICKS = 30;
+export const LINE_REGEN_DELAY_TICKS = ticksAtPace(30);
 
 /**
  * The damage-by-distance curve. Chosen 2026-08-19, see decisions.md.
@@ -173,10 +216,17 @@ export const ATTACK_FULL_DAMAGE_RANGE = 100;
  * design.md section 3 calls non-negotiable. The recovery is the player's reward
  * for reading it: 45 ticks is two attacks at the 20-tick cadence, or one attack
  * and a reposition.
+ *
+ * The wind-up was cut from 45 to 34 at the 1.13 tuning pass. Walking clear of
+ * the hitbox takes 28 ticks, so the slack fell from 17 ticks to 6: the tell now
+ * has to be read as it appears rather than at leisure, or the dash pays for it.
+ * 28 is a hard floor, and a test pins it — below that the attack becomes
+ * undodgeable on foot, which would make the dash mandatory rather than
+ * insurance.
  */
-export const FISH_CLOSE_WINDUP_TICKS = 45;
-export const FISH_CLOSE_ACTIVE_TICKS = 8;
-export const FISH_CLOSE_RECOVERY_TICKS = 45;
+export const FISH_CLOSE_WINDUP_TICKS = ticksAtPace(34);
+export const FISH_CLOSE_ACTIVE_TICKS = ticksAtPace(8);
+export const FISH_CLOSE_RECOVERY_TICKS = ticksAtPace(45);
 
 /**
  * The gap between the end of one attack and the earliest start of the next.
@@ -185,13 +235,17 @@ export const FISH_CLOSE_RECOVERY_TICKS = 45;
  * 1.11. A static fish with no bands still needs some rule for when to commit,
  * and a cooldown is the cheapest one that does not invent band edges early.
  *
- * Recovery plus cooldown is 105 ticks of safety after the hitbox clears, about
- * five attacks at the 20-tick cadence and 40 stamina, during which the refill
+ * Recovery plus cooldown is 85 ticks of safety after the hitbox clears, about
+ * four attacks at the 20-tick cadence and 32 stamina, during which the refill
  * never runs because the 30-tick pause is restarted by every one of them. That
  * is the exchange the fight is built on: the safe window is also the window in
- * which the pool is being emptied. Full cycle is 158 ticks, about 2.6 seconds.
+ * which the pool is being emptied. Full cycle is 127 ticks, about 2.1 seconds.
+ *
+ * Cut from 60 at the 1.13 tuning pass. The old 105-tick safe window was half of
+ * why camping close worked: one dodge on foot bought nearly two seconds of free
+ * damage from the highest-damage position in the fight.
  */
-export const FISH_CLOSE_COOLDOWN_TICKS = 60;
+export const FISH_CLOSE_COOLDOWN_TICKS = ticksAtPace(40);
 
 /**
  * What one landed close punisher takes off the hull.
@@ -207,9 +261,10 @@ export const FISH_CLOSE_HULL_DAMAGE = 25;
  *
  * The hull is 24 wide, so the boat is clear of a 60-wide box at 42 units from
  * the fish's centre. One dash covers 55 and escapes with room; walking covers it
- * in 28 ticks, which fits inside the 45-tick wind-up only if the tell is read
- * immediately. The dash is therefore insurance rather than the only answer,
- * which is what keeps it a decision.
+ * in 28 ticks, which since the 1.13 tuning pass fits inside the 34-tick wind-up
+ * with only 6 ticks to spare. The dash is therefore insurance rather than the
+ * only answer, which is what keeps it a decision, but walking out is now a
+ * read made immediately rather than at leisure.
  *
  * Width is the only number here. The attack is tested horizontally against a
  * boat that is always on the surface, so the box has no meaningful height: what
@@ -234,8 +289,8 @@ export const FISH_CLOSE_HITBOX_WIDTH = 60;
  * Durations in ticks, for the same reason the close punisher's are: a telegraph
  * is reasoned about in frames.
  */
-export const FISH_FAR_WINDUP_TICKS = 40;
-export const FISH_FAR_RECOVERY_TICKS = 30;
+export const FISH_FAR_WINDUP_TICKS = ticksAtPace(40);
+export const FISH_FAR_RECOVERY_TICKS = ticksAtPace(30);
 
 /**
  * The volley. Three shots spaced far enough apart that one lazy sidestep does
@@ -247,16 +302,16 @@ export const FISH_FAR_RECOVERY_TICKS = 30;
  * fourth constant here could disagree with them.
  */
 export const FISH_FAR_SHOT_COUNT = 3;
-export const FISH_FAR_SHOT_INTERVAL_TICKS = 15;
+export const FISH_FAR_SHOT_INTERVAL_TICKS = ticksAtPace(15);
 export const FISH_FAR_ACTIVE_TICKS =
   (FISH_FAR_SHOT_COUNT - 1) * FISH_FAR_SHOT_INTERVAL_TICKS + 1;
 
 /**
  * The gap after the volley before the fish may commit to anything again. Longer
- * than the close punisher's 60, because the shots are still in the air during
+ * than the close punisher's 40, because the shots are still in the air during
  * it: the fish being idle is not the same as the attack being over.
  */
-export const FISH_FAR_COOLDOWN_TICKS = 90;
+export const FISH_FAR_COOLDOWN_TICKS = ticksAtPace(90);
 
 /**
  * How fast a shot climbs towards the surface, and how fast it may drift
@@ -265,13 +320,13 @@ export const FISH_FAR_COOLDOWN_TICKS = 90;
  * Authored per second with the per-tick values derived from TICK_HZ, same as the
  * boat's speed and the stamina refill.
  *
- * 72 a second is 1.2 units a tick, so from the fish's starting depth of 100 a
- * shot is in the air for 84 ticks. With the 40-tick wind-up in front of it that
- * is about two seconds of warning, and it scales with depth for free: once the
- * AI owns depth at task 1.11, a deep fish telegraphs further ahead and a shallow
- * one gives barely any notice.
+ * 96 a second is 1.6 units a tick, so from the fish's resting depth of 100 a
+ * shot is in the air for about 63 ticks. With the 40-tick wind-up in front of it
+ * that is about 1.7 seconds of warning, and it scales with depth for free: a
+ * deep fish telegraphs further ahead and a shallow one gives barely any notice.
+ * Raised from 72 at the 1.13 tuning pass, on "projectiles could be faster".
  *
- * 36 a second of tracking is 40% of the 90 the boat walks at. That inequality is
+ * 48 a second of tracking is 53% of the 90 the boat walks at. That inequality is
  * the whole design of the attack and a test pins it: walking always outruns the
  * correction, so the volley is answered by reading it rather than by spending a
  * dash, while a player who only shuffles gets followed.
@@ -288,9 +343,9 @@ export const FISH_FAR_COOLDOWN_TICKS = 90;
  * walking speed rather than as a value, so a retune during task 1.13 cannot
  * quietly turn the volley into something only a dash answers.
  */
-export const FISH_FAR_RISE_PER_SECOND = 72;
+export const FISH_FAR_RISE_PER_SECOND = atPace(96);
 export const FISH_FAR_RISE_PER_TICK = FISH_FAR_RISE_PER_SECOND / TICK_HZ;
-export const FISH_FAR_TRACK_PER_SECOND = 36;
+export const FISH_FAR_TRACK_PER_SECOND = atPace(48);
 export const FISH_FAR_TRACK_PER_TICK = FISH_FAR_TRACK_PER_SECOND / TICK_HZ;
 
 /**
@@ -370,20 +425,31 @@ export const FISH_FAR_BAND_DEPTH = 100;
  * Authored per second with the per-tick values derived from TICK_HZ, same as the
  * boat's speed, the stamina refill and the shots' climb.
  *
- * 36 a second is 40% of the 90 the boat walks at, and a test pins that
+ * 42 a second is 47% of the 90 the boat walks at, and a test pins that
  * inequality rather than the value. Walking always breaks contact, so a fish
  * gliding towards you is pressure rather than a trap, and the dash is still
- * insurance rather than the only way out. It closes about 36 units over a
- * close-punisher cooldown, which is most of the way from the edge of the hitbox
- * to underneath you.
+ * insurance rather than the only way out. It closes about 28 units over a
+ * close-punisher cooldown, most of the way from the edge of the hitbox to
+ * underneath you.
+ *
+ * **The pinned inequality is necessary but not sufficient, and this number is
+ * capped well below it.** Being slower than the boat only guarantees breaking
+ * contact in an unbounded lane; the lane is 480 units and the boat is clamped to
+ * it. A boat that starts directly above the fish and runs has about 205 ticks
+ * before it hits a wall, and it needs the gap to reach ~147 units for the band
+ * to flip back to far. That caps the swim speed near 47 whatever the pinned
+ * inequality says, and 42 is chosen to keep about 20 ticks of margin. Raised
+ * from 36 at the 1.13 tuning pass; 54 was tried first and let the fish corner a
+ * fleeing boat against the wall permanently, which is the trap decisions.md
+ * rules out.
  *
  * 30 a second of rise and dive takes the fish between its two resting depths in
  * about 1.7 seconds, a little under one attack cycle, so it arrives at the depth
  * its band wants at roughly the moment it is ready to attack from there.
  */
-export const FISH_SWIM_PER_SECOND = 36;
+export const FISH_SWIM_PER_SECOND = atPace(42);
 export const FISH_SWIM_PER_TICK = FISH_SWIM_PER_SECOND / TICK_HZ;
-export const FISH_DIVE_PER_SECOND = 30;
+export const FISH_DIVE_PER_SECOND = atPace(30);
 export const FISH_DIVE_PER_TICK = FISH_DIVE_PER_SECOND / TICK_HZ;
 
 /**
@@ -411,8 +477,14 @@ export const FISH_FAR_TELL_PADDING = 4;
  *
  * In ticks rather than derived from a per-second rate, for the same reason the
  * attack durations are: a beat is reasoned about in frames.
+ *
+ * Paced with everything else at the 1.13 tuning pass, so the effective beat is
+ * 1.6 seconds rather than two. Worth watching: design.md section 2 asks for "a
+ * few seconds", and pacing is walking this away from that rather than towards
+ * it. If it starts reading as a blink instead of a beat, exempt this one
+ * constant from `ticksAtPace` rather than lowering GAME_PACE.
  */
-export const REEL_IN_TICKS = 120;
+export const REEL_IN_TICKS = ticksAtPace(120);
 
 /**
  * How the two endings are drawn: one flat wash over the whole screen.
@@ -519,6 +591,12 @@ export const DEFAULT_LINE_MAX = 80;
  * 1.7, which is long enough for the fish to cycle its moveset several times.
  * Like FISH_START_X and FISH_START_DEPTH above, this belongs to one fish and
  * moves into a fish definition file at task 3.1.
+ *
+ * Deliberately **not** paced at the 1.13 tuning pass, and deliberately not
+ * raised to compensate for pacing either. Attacks come 25% more often at
+ * GAME_PACE 1.25 while this stays at 400, so the fight now runs about 48 to 72
+ * seconds. Chosen over holding the original 60 to 90: a longer fast fight reads
+ * as padded, and a shorter one suits a phase that is played twenty times over.
  */
 export const FISH_RESISTANCE_MAX = 400;
 
