@@ -20,7 +20,13 @@ import {
   FISH_CLOSE_HULL_DAMAGE,
   FISH_CLOSE_RECOVERY_TICKS,
   FISH_CLOSE_WINDUP_TICKS,
+  FISH_FAR_ACTIVE_TICKS,
+  FISH_FAR_HULL_DAMAGE,
+  FISH_FAR_RISE_PER_TICK,
+  FISH_FAR_SHOT_COUNT,
+  FISH_FAR_WINDUP_TICKS,
   FISH_RESISTANCE_MAX,
+  FISH_START_DEPTH,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_SECOND,
@@ -44,6 +50,24 @@ function hold(state: FightState, inputs: FightInputs, n: number): FightState {
     next = stepFight(next, inputs);
   }
   return next;
+}
+
+/**
+ * Long enough that the fish never commits during a test that is not about it.
+ *
+ * Since task 1.10 the fish answers every position on the lane with one attack or
+ * the other, so there is nowhere to park a boat while something else is being
+ * measured. Tests about the boat's own resources start the fish on a cooldown it
+ * will not finish rather than pretending the fight is quiet.
+ */
+const NEVER = 100_000;
+
+/** A fight the fish sits out. */
+function quietFish(state: FightState = createFightState()): FightState {
+  return {
+    ...state,
+    fish: { ...state.fish, attackCooldownRemaining: NEVER },
+  };
 }
 
 /**
@@ -627,10 +651,12 @@ describe('stepFight: the pool refills', () => {
     expect(state.boat.line).toBeLessThan(DEFAULT_LINE_MAX / 2);
   });
 
-  // Task 1.9 retired the old version of this, which asserted the hull was never
-  // touched at all. The fish is what touches it now, and only from close range.
-  it('leaves the hull alone while the boat keeps its distance', () => {
-    const start = createFightState();
+  // Task 1.9 retired the first version of this, which asserted the hull was
+  // never touched at all, and 1.10 retired the second, which kept the boat away
+  // from the fish. There is nowhere left on the lane where the hull is safe, so
+  // what is asserted now is only that nothing the player does spends it.
+  it('leaves the hull alone while the fish is not attacking', () => {
+    const start = quietFish();
     const after = hold(start, LEFT, 600);
 
     expect(after.boat.hull).toBe(start.boat.hull);
@@ -710,11 +736,101 @@ describe('stepFight: the fish punishes standing close', () => {
     expect(after.boat.hull).toBe(DEFAULT_HULL_MAX);
   });
 
-  it('never attacks a boat that stays across the lane', () => {
+  it('never swings the close punisher at a boat across the lane', () => {
+    // It answers, but with the other attack. Task 1.10 replaced the version of
+    // this that asserted the fish did nothing at all: design.md section 3's
+    // no-safe-camping-spot rule is exactly the claim that no such position
+    // exists, so a test asserting one would be asserting the bug.
     const after = hold(createFightState(), LEFT, 600);
 
-    expect(after.fish.attackPhase).toBe('idle');
+    expect(after.fish.attackKind).not.toBe('close');
+  });
+});
+
+describe('stepFight: the fish punishes standing far', () => {
+  /** Ticks from the fish's starting depth to the surface. */
+  const FLIGHT = Math.ceil(FISH_START_DEPTH / FISH_FAR_RISE_PER_TICK);
+  /** One tick to leave idle, the tell, and the whole volley in the air. */
+  const ONE_VOLLEY = 1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS + FLIGHT;
+
+  // The boat opens the fight 100 units clear of the fish, which is outside the
+  // close punisher's reach, so standing still is already standing far.
+  it('answers a boat that does nothing with a volley', () => {
+    const after = hold(
+      createFightState(),
+      noInputs(),
+      1 + FISH_FAR_WINDUP_TICKS,
+    );
+
+    expect(after.fish.attackKind).toBe('far');
+    expect(after.fish.attackPhase).toBe('active');
+  });
+
+  it('puts the shots in the water and takes them out again', () => {
+    const firing = hold(
+      createFightState(),
+      noInputs(),
+      1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+    );
+    expect(firing.projectiles).toHaveLength(FISH_FAR_SHOT_COUNT);
+
+    // Long enough for the last of them to reach the surface. Nothing is left
+    // behind: a shot that misses is gone, not parked at depth zero.
+    const landed = hold(firing, noInputs(), FLIGHT);
+    expect(landed.projectiles).toHaveLength(0);
+  });
+
+  it('costs the hull once per shot a boat stands still under', () => {
+    const after = hold(createFightState(), noInputs(), ONE_VOLLEY);
+
+    expect(after.boat.hull).toBe(
+      DEFAULT_HULL_MAX - FISH_FAR_SHOT_COUNT * FISH_FAR_HULL_DAMAGE,
+    );
+  });
+
+  it('costs nothing to a boat that walks away from the tell', () => {
+    // Walking, not dashing, and no stamina spent. design.md section 3 asks for a
+    // volley that is trivially sidestepped up close and hard to read from far
+    // away: the cost of ignoring it is real, and the cost of reading it is zero.
+    const after = hold(createFightState(), LEFT, ONE_VOLLEY);
+
     expect(after.boat.hull).toBe(DEFAULT_HULL_MAX);
+    expect(after.boat.line).toBe(DEFAULT_LINE_MAX);
+  });
+
+  it('keeps firing the shots after the fish has stopped attacking', () => {
+    // The volley outlives the attack. This is what lets the player be answering
+    // shots overhead while the fish is already winding up something else, and it
+    // is deliberate rather than an accident of the ordering.
+    const fired = hold(
+      createFightState(),
+      noInputs(),
+      1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+    );
+    const recovering = hold(fired, noInputs(), 1);
+
+    expect(recovering.fish.attackPhase).toBe('recovery');
+    expect(recovering.projectiles.length).toBeGreaterThan(0);
+  });
+
+  it('lets the close punisher start with shots still in the air', () => {
+    // Seeded rather than played out. At the fish's starting depth a volley has
+    // always landed before its own recovery and cooldown are over, so this cannot
+    // be reached from the opening position: it needs a deeper fish, which is task
+    // 1.11's to give. Pinned now anyway, because the rule is that shots are
+    // entities in their own right and the fish is free the moment it recovers,
+    // and that must not be quietly "fixed" into the fish being busy.
+    const start = createFightState();
+    const state: FightState = {
+      ...start,
+      boat: { ...start.boat, x: start.fish.x },
+      projectiles: [{ x: start.fish.x, depth: FISH_START_DEPTH, vx: 0 }],
+    };
+
+    const after = stepFight(state, noInputs());
+
+    expect(after.fish.attackKind).toBe('close');
+    expect(after.projectiles).toHaveLength(1);
   });
 });
 
@@ -736,14 +852,18 @@ describe('stepFight: purity', () => {
   // stepFight builds a fresh state object every tick, so any field it forgets
   // to carry forward silently disappears one tick into the fight.
   //
-  // Away from the fish rather than towards it, deliberately. The fish is
-  // entitled to change once the boat is inside its reach, so driving right here
-  // would be asserting that it does nothing while walking into its hitbox.
-  it('carries the fish forward unchanged while the boat keeps away', () => {
-    const start = createFightState();
+  // Since task 1.10 there is nowhere to stand where the fish does nothing, so
+  // the only quiet fish is one that is still on cooldown. Everything about it
+  // has to survive 300 ticks except that cooldown counting down, and comparing
+  // the whole object is what catches a field `stepFight` forgot to name.
+  it('carries the fish forward, changing only what is running', () => {
+    const start = quietFish();
     const after = hold(start, LEFT, 300);
 
-    expect(after.fish).toEqual(start.fish);
+    expect(after.fish).toEqual({
+      ...start.fish,
+      attackCooldownRemaining: NEVER - 300,
+    });
   });
 
   // The fish used to be carried forward by reference. The basic attack writes
@@ -751,36 +871,52 @@ describe('stepFight: purity', () => {
   // it falls into the same trap: a field left unnamed there disappears one tick
   // into the fight.
   it('rebuilds the fish rather than sharing it, keeping every field', () => {
-    const start = createFightState();
+    // On cooldown, so the one tick under test is a tick the fish spends doing
+    // nothing but counting down and the rest of it has to survive untouched.
+    const start = quietFish();
     const after = stepFight(start, ATTACK);
 
     expect(after.fish).not.toBe(start.fish);
-    expect(after.fish.x).toBe(start.fish.x);
-    expect(after.fish.depth).toBe(start.fish.depth);
-    expect(after.fish.resistanceMax).toBe(start.fish.resistanceMax);
-    expect(after.fish.attackPhase).toBe(start.fish.attackPhase);
-    expect(after.fish.attackPhaseTicksRemaining).toBe(
-      start.fish.attackPhaseTicksRemaining,
-    );
-    expect(after.fish.attackCooldownRemaining).toBe(
-      start.fish.attackCooldownRemaining,
-    );
-    expect(after.fish.attackHasHit).toBe(start.fish.attackHasHit);
+    expect(after.fish).toEqual({
+      ...start.fish,
+      resistance: after.fish.resistance,
+      attackCooldownRemaining: NEVER - 1,
+    });
+    expect(after.fish.resistance).toBeLessThan(start.fish.resistance);
     expect(start.fish.resistance).toBe(FISH_RESISTANCE_MAX);
   });
 
   // The boat object is rebuilt every tick around the one field that changes,
-  // so it falls into the same trap the fish test above guards against.
-  // Away from the fish, for the same reason as the fish test above: the hull is
-  // no longer untouchable, it is untouched by anything the boat does itself.
+  // so it falls into the same trap the fish test above guards against. A quiet
+  // fish for the same reason too: the hull is no longer untouchable anywhere on
+  // the lane, only untouched by anything the boat does itself.
   it('carries the boat resources forward unchanged', () => {
-    const start = createFightState();
+    const start = quietFish();
     const after = hold(start, LEFT, 300);
 
     expect(after.boat.hull).toBe(start.boat.hull);
     expect(after.boat.hullMax).toBe(start.boat.hullMax);
     expect(after.boat.line).toBe(start.boat.line);
     expect(after.boat.lineMax).toBe(start.boat.lineMax);
+  });
+
+  // The third thing stepFight rebuilds from scratch every tick, and the only one
+  // that is a list rather than an object, so it fails differently: a shot that
+  // is not carried forward vanishes mid-flight instead of a field going missing.
+  it('rebuilds the shots rather than sharing the array', () => {
+    const start = createFightState();
+    const flying = hold(
+      start,
+      noInputs(),
+      2 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+    );
+    const after = stepFight(flying, noInputs());
+
+    expect(after.projectiles).not.toBe(flying.projectiles);
+    expect(after.projectiles).toHaveLength(flying.projectiles.length);
+    expect(after.projectiles[0]?.depth).toBeLessThan(
+      flying.projectiles[0]?.depth ?? 0,
+    );
   });
 
   it('is deterministic', () => {

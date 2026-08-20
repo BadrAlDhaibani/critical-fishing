@@ -68,6 +68,21 @@ export interface DebugFields {
    */
   fishPhase: string;
   fishPhaseTicks: number;
+  /**
+   * Which attack that phase belongs to, or null while idle. Worth naming during
+   * the tuning pass because the two triggers are exact opposites of each other:
+   * seeing both named at once would mean the mirror has broken.
+   */
+  fishAttackKind: string | null;
+  /** Shots in the air. They outlive the attack, so the phase does not show it. */
+  projectiles: number;
+}
+
+/** "far:windUp" while attacking, plain "idle" between attempts. */
+function attackLabel(fields: DebugFields): string {
+  return fields.fishAttackKind === null
+    ? fields.fishPhase
+    : `${fields.fishAttackKind}:${fields.fishPhase}`;
 }
 
 export class DebugOverlay {
@@ -95,7 +110,8 @@ export class DebugOverlay {
       `tether ${fields.lineLength.toFixed(1)} u`,
       `resist ${fields.resistance}/${fields.resistanceMax}`,
       `dmg    ${fields.attackDamage}`,
-      `fish   ${fields.fishPhase} ${fields.fishPhaseTicks}`,
+      `fish   ${attackLabel(fields)} ${fields.fishPhaseTicks}`,
+      `shots  ${fields.projectiles}`,
     ].join('\n');
   }
 }

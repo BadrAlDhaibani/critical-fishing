@@ -24,7 +24,7 @@ import {
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_TICK,
 } from '../data/config.ts';
-import { stepClosePunisher } from './ai/patterns.ts';
+import { stepFishAttack, stepProjectiles } from './ai/patterns.ts';
 import { basicAttackDamage } from './damage.ts';
 import { lineLength } from './distance.ts';
 import type { FightInputs, FightState } from './state.ts';
@@ -157,8 +157,21 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // done by leaving it rather than by phasing through it. design.md pillar 3
   // stays literal that way, since every hit is then a question of where the boat
   // was standing. A test pins this so it cannot drift back.
-  const attack = stepClosePunisher(state.fish, x);
-  const hull = Math.max(0, state.boat.hull - attack.hullDamage);
+  // Shots already in the air first, then the fish, then whatever the fish just
+  // fired. A shot spawned this tick appears at the fish and neither moves nor
+  // resolves until the next one, so no shot can be fired and land in the same
+  // tick however shallow the fish gets once the AI owns depth at task 1.11.
+  const shots = stepProjectiles(state.projectiles, x);
+  const attack = stepFishAttack(state.fish, x);
+  const projectiles = [...shots.projectiles, ...attack.spawned];
+
+  // Both can land in the same tick. That is the volley outliving the attack that
+  // fired it, which is the point of it: closing in to punish the recovery means
+  // answering the shots still overhead at the same time.
+  const hull = Math.max(
+    0,
+    state.boat.hull - attack.hullDamage - shots.hullDamage,
+  );
 
   // Both objects are rebuilt from scratch every tick, so every field has to be
   // named here or it silently disappears one tick into the fight.
@@ -186,9 +199,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       resistance,
       resistanceMax: state.fish.resistanceMax,
       attackPhase: attack.attackPhase,
+      attackKind: attack.attackKind,
       attackPhaseTicksRemaining: attack.attackPhaseTicksRemaining,
       attackCooldownRemaining: attack.attackCooldownRemaining,
       attackHasHit: attack.attackHasHit,
     },
+    projectiles,
   };
 }

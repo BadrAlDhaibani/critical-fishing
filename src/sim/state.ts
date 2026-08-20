@@ -110,6 +110,51 @@ export interface BoatState {
  */
 export type FishAttackPhase = 'idle' | 'windUp' | 'active' | 'recovery';
 
+/**
+ * Which of the fish's attacks the current phase belongs to.
+ *
+ * design.md section 3 requires both: one that punishes standing close and one
+ * that punishes standing far. The fish runs one at a time through the single
+ * phase machine above, so this says which, and is null exactly while idle.
+ *
+ * Not a selection system. Until task 1.11 gives the fish distance bands, which
+ * one starts is decided by where the boat is standing, and the two triggers are
+ * exact opposites of each other so no chooser exists yet.
+ */
+export type FishAttackKind = 'close' | 'far';
+
+/**
+ * One shot from the far punisher's volley, in flight.
+ *
+ * Its climb is constant and its correction is capped, so neither is stored. The
+ * lob it was fired with is, because it is decided once, at the moment it leaves
+ * the fish, and cannot be worked out again afterwards.
+ */
+export interface ProjectileState {
+  /** Horizontal position in internal-resolution units, at the shot's centre. */
+  x: number;
+  /**
+   * How far below the surface it still is, in the same units as the fish's
+   * depth. Counts down as it climbs, and the shot resolves at zero.
+   */
+  depth: number;
+  /**
+   * The lob: horizontal units per tick, fixed when the shot is fired so that it
+   * arrives at wherever the boat was standing at that moment.
+   *
+   * Without it a shot could only ever reach as far sideways as its tracking cap
+   * carried it, which is about fifty units, and a boat parked across the lane
+   * would be untouchable. That is the safe camping spot design.md section 3
+   * exists to forbid, so the volley is thrown at the player and the tracking is
+   * a correction on top of it rather than the whole of its aim.
+   *
+   * The correction is what stays slower than walking, which is what keeps the
+   * attack dodgeable: the lob answers where the player *was*, and only reading
+   * the tell and moving answers where they are going to be.
+   */
+  vx: number;
+}
+
 export interface FishState {
   /** Horizontal position in internal-resolution units, at the fish's centre. */
   x: number;
@@ -131,13 +176,28 @@ export interface FishState {
    */
   resistanceMax: number;
   /**
-   * Which part of the close punisher is running, or `idle` between attempts.
+   * Which part of the current attack is running, or `idle` between attempts.
    *
-   * Hard-coded to one attack for now. Task 3.1 is what turns this into a
+   * Hard-coded to two attacks for now. Task 3.1 is what turns this into a
    * selection from a fish definition's pattern list, and task 1.11 is what gives
-   * the fish bands to select by; until then a cooldown decides when it commits.
+   * the fish bands to select by; until then where the boat stands decides which
+   * of the two it commits to, and a cooldown decides when.
    */
   attackPhase: FishAttackPhase;
+  /**
+   * Which attack `attackPhase` belongs to, or null while idle.
+   *
+   * One phase machine and one cooldown for both attacks rather than a set each,
+   * because the fish does one thing at a time. Two independent machines would
+   * allow a fish half way through a lunge and a volley at once, which is a state
+   * that means nothing, for the same reason three phase counters would be.
+   *
+   * The volley's shots are the exception, and deliberately so: once fired they
+   * are entities of their own in `FightState.projectiles` and outlive the attack
+   * that fired them, so the fish can be winding up a close punisher while its
+   * own shots are still climbing.
+   */
+  attackKind: FishAttackKind | null;
   /**
    * Ticks left in whichever phase is currently running. Zero while `idle`.
    *
@@ -158,6 +218,9 @@ export interface FishState {
    * a boat that dashes into it after it opens is still hit. This is what stops
    * that costing the hull once per tick: one swing is one hit, however long the
    * player stands in it. Cleared when a wind-up ends and the next swing opens.
+   *
+   * The close punisher's, specifically. The far punisher needs nothing like it,
+   * because each of its shots is consumed the moment it resolves.
    */
   attackHasHit: boolean;
 }
@@ -167,6 +230,16 @@ export interface FightState {
   tick: number;
   boat: BoatState;
   fish: FishState;
+  /**
+   * Every shot currently in the air, oldest first.
+   *
+   * At the top level rather than under the fish that fired them, because a shot
+   * outlives the attack: the far punisher recovers and goes idle with its volley
+   * still climbing, which is what lets the player be answering two things at
+   * once. In phase 7 they are broadcast state in their own right, belonging to
+   * the room rather than to any one combatant.
+   */
+  projectiles: ProjectileState[];
 }
 
 /**
@@ -225,12 +298,15 @@ export function createFightState(): FightState {
       resistanceMax: FISH_RESISTANCE_MAX,
       // Ready rather than on cooldown, so the fish answers the moment the
       // player closes on it. It opens the fight 100 units clear of the boat,
-      // which is outside the hitbox, so this costs nothing on tick one.
+      // which is outside the close punisher's hitbox, so tick one is a far
+      // punisher winding up and the player has the whole flight to answer it.
       attackPhase: 'idle',
+      attackKind: null,
       attackPhaseTicksRemaining: 0,
       attackCooldownRemaining: 0,
       attackHasHit: false,
     },
+    projectiles: [],
   };
 }
 

@@ -481,3 +481,81 @@ screen would do that for the player.
 Rejected: 30/6/30 and 60/10/60 timings, 30- and 90-tick cooldowns, 15 and 34
 hull damage, 44- and 80-wide hitboxes, a solid box throughout the wind-up, and
 telegraphing on the fish's own rectangle instead of on the water above it.
+
+## 2026-08-20: The far punisher is a lobbed volley of three, 40/31/30 for 8 a shot
+
+The other half of design.md section 3's no-safe-camping-spot rule, and the last
+of the attack timings in the section 8 open questions. Confirmed by playtest the
+same day and not retuned.
+
+**40 wind-up, 3 shots one every 15 ticks, 30 recovery, 90 cooldown.** The active
+duration is derived from the count and the interval rather than tuned, so the
+phase always lasts exactly as long as the volley takes to leave. The tell is
+shorter than the close punisher's 45 because it is not the whole warning: the
+shots then spend 84 ticks in the air from the fish's starting depth, so the
+player has about two seconds in total. Spreading the three over half a second is
+what makes it a volley rather than three copies of one dodge, since a single lazy
+sidestep does not clear all of them. Full cycle 191 ticks against the close
+punisher's 158.
+
+**8 hull damage a shot, 24 for a whole volley**, against the close punisher's 25
+for one lunge. Deliberately cheaper per hit: one shot is a scratch that says
+move, and it is only camping across the lane and ignoring every one of them that
+ends a fight. 10 units wide against the 24-wide hull puts the boat clear 17 units
+away, which is 11 ticks of walking.
+
+**Each shot is thrown at where the boat was standing on the tick it fired, and
+corrects towards it at 36 u/s on top of that.** The plan agreed before
+implementation had no lob: shots would rise from the fish and steer at the capped
+rate, and nothing else. Built that way the attack does not work, and the reason
+is worth keeping. The correction cap has to stay under the 90 u/s walking speed
+or the volley becomes something only a dash answers, and at any such rate it
+closes about fifty units over a full flight. A boat parked two hundred units away
+is then untouchable, which is precisely the safe camping spot this attack exists
+to remove. Tracking alone cannot cross the lane at any speed that is still fair.
+
+So the lob is the aim and the tracking is the correction. The lob answers where
+the player _was_, which is what lets the volley reach anywhere on the lane; the
+cap answers where they are going, slowly enough that walking always wins. That is
+design.md section 3's "trivially sidestepped up close, hard to read from across
+the screen" as two numbers: reading the tell and walking costs nothing at all,
+and ignoring it costs a quarter of the hull.
+
+**The trigger is the exact negation of `closePunisherHits`.** The far punisher
+fires whenever the close one would not, so the two cover the lane between them,
+overlap nowhere, and no attack selection code exists yet to be thrown away when
+the distance bands arrive at task 1.11. It also means no second range number was
+invented. The cost, accepted knowingly, is that there is now nowhere on the lane
+where the fish does nothing.
+
+**Shots are entities in `FightState.projectiles`, not part of the attack.** The
+fish recovers and goes idle with its volley still climbing. At the starting depth
+that changes nothing, since recovery plus cooldown is 120 ticks against an
+84-tick flight, but once the AI owns depth at 1.11 a deep fish will be winding
+something up while its own shots are still in the water. Flight time is derived
+from depth rather than tuned, so a fish that dives telegraphs further ahead and
+one that surfaces gives barely any notice, without a number moving.
+
+Three implementation notes that are decisions rather than detail. Both attacks
+run through **one phase machine with one cooldown**, plus a `fish.attackKind`
+saying which owns it, because the fish does one thing at a time and two machines
+would allow a lunge and a volley half finished at once; a non-idle phase with no
+kind throws rather than defaulting, since a silent fallback would be the fish
+quietly running the wrong attack for a second and a half. The far punisher's tell
+is an **outline on the fish**, not a column of water, and deliberately a
+different shape rather than a variation, because the two tells ask for opposite
+movements and must never be read for one another. And the shots are drawn
+**without interpolation**, since the list changes length as they resolve and
+index-matching two ticks would smear a shot that just landed into one just fired.
+
+One consequence for the tests. There is no longer anywhere to park a boat while
+something else is being measured, so three tests that assumed a quiet fish were
+rewritten and `tests/fight.test.ts` gained a `quietFish()` helper that seeds a
+cooldown the fish will not finish. A test that needs the fish silent cannot get
+there by standing somewhere any more.
+
+Rejected: two shots at 12 damage and four at 5, full homing at a constant speed,
+aiming at launch with no tracking at all, a separate minimum range for the far
+punisher with a dead band between the two attacks, firing on a metronome
+regardless of where the boat is, and holding the fish busy until the last shot of
+its volley lands.

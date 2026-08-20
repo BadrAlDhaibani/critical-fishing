@@ -20,17 +20,30 @@ general best practice, only things proven here.
 
 ## Established patterns
 
-Nothing yet. This file fills up as the code gets written. Resist the urge to
-seed it with generic TypeScript advice, which belongs in eslint config, not
-here.
+### Take a `Pick<>` of what you read, return a patch
 
-<!-- Format for entries:
+A function inside `sim/` that works on part of the state takes a `Pick<>` of
+exactly the fields it reads, never the whole object, and returns a patch that
+spreads into it. Callers can then pass values they have already resolved this
+tick instead of building a state around them, and the signature says what the
+function actually depends on.
 
-### Name of the pattern
+```ts
+export function stepProjectiles(
+  projectiles: readonly ProjectileState[],
+  boatX: number,
+): ProjectileStepResult;
 
-What it is, in a sentence or two. A short example if it needs one.
-Used in: file, file, file
--->
+const shots = stepProjectiles(state.projectiles, x); // x, not state.boat.x
+```
+
+The boat x above is the one this tick has already produced, which is the point:
+`stepFight` resolves movement first, so a dash that carried the boat out of a
+hitbox this tick has carried it out. A function taking `FightState` could only
+see where the boat started.
+
+Used in: `sim/distance.ts` (`lineLength`), `sim/ai/patterns.ts`
+(`stepFishAttack`, `stepProjectiles`)
 
 ---
 

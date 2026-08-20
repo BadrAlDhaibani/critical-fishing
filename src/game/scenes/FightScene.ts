@@ -34,6 +34,7 @@ import {
 import { DebugOverlay } from '../render/debugOverlay.ts';
 import { Bar } from '../render/bars.ts';
 import { Telegraph } from '../render/telegraph.ts';
+import { Projectiles } from '../render/projectiles.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -49,6 +50,7 @@ export class FightScene extends Phaser.Scene {
   private fish!: Phaser.GameObjects.Rectangle;
   private line!: Phaser.GameObjects.Graphics;
   private telegraph!: Telegraph;
+  private projectiles!: Projectiles;
 
   private hullBar!: Bar;
   private lineBar!: Bar;
@@ -109,6 +111,11 @@ export class FightScene extends Phaser.Scene {
       COLOUR_FISH,
     );
 
+    // Over the fish and the water but under nothing else, so a shot climbing
+    // past the fish that fired it stays readable. It is the one thing on screen
+    // the player has to track continuously.
+    this.projectiles = new Projectiles(this);
+
     // Both sides' bars live in the sky above the waterline: the player's
     // stacked at the left, the fish's at the right, so the fight reads as one
     // against the other and neither ever moves.
@@ -161,7 +168,16 @@ export class FightScene extends Phaser.Scene {
     // values: which phase the fish is in is a discrete fact that must not be
     // smeared across a frame, but where the box sits has to agree with the fish
     // drawn at the same instant.
-    this.telegraph.show(this.driver.current.fish.attackPhase, fishX, fishY);
+    this.telegraph.show(
+      this.driver.current.fish.attackPhase,
+      this.driver.current.fish.attackKind,
+      fishX,
+      fishY,
+    );
+
+    // Not interpolated, unlike the boat and the fish: shots appear and vanish,
+    // so there is no stable pairing between one tick's list and the next's.
+    this.projectiles.show(this.driver.current.projectiles);
 
     this.updateBars();
     this.updateReadout(delta);
@@ -222,6 +238,8 @@ export class FightScene extends Phaser.Scene {
         fish.attackPhase === 'idle'
           ? fish.attackCooldownRemaining
           : fish.attackPhaseTicksRemaining,
+      fishAttackKind: fish.attackKind,
+      projectiles: this.driver.current.projectiles.length,
     });
   }
 }

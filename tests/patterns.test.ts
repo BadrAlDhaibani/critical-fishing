@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
   CLOSE_PUNISHER_REACH,
+  FAR_SHOT_REACH,
   closePunisherHits,
-  stepClosePunisher,
+  farPunisherFires,
+  shotFlightTicks,
+  stepFishAttack,
+  stepProjectiles,
 } from '../src/sim/ai/patterns.ts';
 import { createFightState } from '../src/sim/state.ts';
-import type { FishState } from '../src/sim/state.ts';
+import type {
+  FishAttackKind,
+  FishState,
+  ProjectileState,
+} from '../src/sim/state.ts';
 import {
   BOAT_SPEED_PER_TICK,
   DASH_DISTANCE,
@@ -14,6 +22,16 @@ import {
   FISH_CLOSE_HULL_DAMAGE,
   FISH_CLOSE_RECOVERY_TICKS,
   FISH_CLOSE_WINDUP_TICKS,
+  FISH_FAR_ACTIVE_TICKS,
+  FISH_FAR_COOLDOWN_TICKS,
+  FISH_FAR_HULL_DAMAGE,
+  FISH_FAR_RECOVERY_TICKS,
+  FISH_FAR_RISE_PER_TICK,
+  FISH_FAR_SHOT_COUNT,
+  FISH_FAR_SHOT_INTERVAL_TICKS,
+  FISH_FAR_TRACK_PER_TICK,
+  FISH_FAR_WINDUP_TICKS,
+  FISH_START_DEPTH,
 } from '../src/data/config.ts';
 
 /**
@@ -29,26 +47,64 @@ const ON_TOP = createFightState().fish.x;
 /** Comfortably outside the hitbox, and outside it by more than one dash. */
 const FAR_AWAY = ON_TOP - 200;
 
+interface Run {
+  fish: FishState;
+  totalDamage: number;
+  hits: number;
+  /** Every shot fired during the run, oldest first. */
+  spawned: ProjectileState[];
+  /** Which tick of the run each of those was fired on. */
+  spawnTicks: number[];
+  /** Every attack the fish committed to during the run. */
+  kinds: Set<FishAttackKind>;
+}
+
 /**
  * Run n ticks of the pattern with the boat parked at one x, returning the fish
- * and everything the hull was charged along the way.
+ * and everything it did along the way.
  */
-function run(
-  fish: FishState,
-  boatX: number,
-  n: number,
-): { fish: FishState; totalDamage: number; hits: number } {
+function run(fish: FishState, boatX: number, n: number): Run {
   let next = fish;
   let totalDamage = 0;
   let hits = 0;
+  const spawned: ProjectileState[] = [];
+  const spawnTicks: number[] = [];
+  const kinds = new Set<FishAttackKind>();
 
   for (let i = 0; i < n; i++) {
-    const result = stepClosePunisher(next, boatX);
+    const result = stepFishAttack(next, boatX);
     next = { ...next, ...result };
     totalDamage += result.hullDamage;
     if (result.hullDamage > 0) hits++;
+    for (const shot of result.spawned) {
+      spawned.push(shot);
+      spawnTicks.push(i);
+    }
+    if (result.attackKind !== null) kinds.add(result.attackKind);
   }
-  return { fish: next, totalDamage, hits };
+  return { fish: next, totalDamage, hits, spawned, spawnTicks, kinds };
+}
+
+/** Run n ticks of the shots in the air with the boat parked at one x. */
+function fly(
+  projectiles: ProjectileState[],
+  boatX: number,
+  n: number,
+): { projectiles: ProjectileState[]; totalDamage: number } {
+  let next = projectiles;
+  let totalDamage = 0;
+
+  for (let i = 0; i < n; i++) {
+    const result = stepProjectiles(next, boatX);
+    next = result.projectiles;
+    totalDamage += result.hullDamage;
+  }
+  return { projectiles: next, totalDamage };
+}
+
+/** One shot, fired from where the fish starts the fight and aimed straight up. */
+function shotAt(x: number, depth = FISH_START_DEPTH, vx = 0): ProjectileState {
+  return { x, depth, vx };
 }
 
 describe('closePunisherHits: the hitbox', () => {
@@ -86,18 +142,43 @@ describe('closePunisherHits: the hitbox', () => {
   });
 });
 
-describe('stepClosePunisher: committing to an attack', () => {
+describe('the two triggers', () => {
+  // The reason no attack selection code exists yet. If a dead band ever opened
+  // up between the two, or the far punisher grew a minimum range of its own,
+  // these fail rather than the fish quietly standing still mid-lane.
+  it('cover the whole lane and overlap nowhere', () => {
+    for (let offset = -240; offset <= 240; offset++) {
+      const boatX = ON_TOP + offset;
+      const close = closePunisherHits(ON_TOP, boatX);
+
+      expect(farPunisherFires(ON_TOP, boatX)).toBe(!close);
+    }
+  });
+
+  it('hand the boundary to the far punisher, the same way the hitbox does', () => {
+    expect(farPunisherFires(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH)).toBe(true);
+    expect(farPunisherFires(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH - 1)).toBe(
+      false,
+    );
+  });
+});
+
+describe('the close punisher: committing to an attack', () => {
   it('winds up as soon as the boat is in range', () => {
     const { fish } = run(fishAt(), ON_TOP, 1);
 
     expect(fish.attackPhase).toBe('windUp');
+    expect(fish.attackKind).toBe('close');
     expect(fish.attackPhaseTicksRemaining).toBe(FISH_CLOSE_WINDUP_TICKS);
   });
 
-  it('never starts while the boat stays out of range', () => {
-    const { fish, totalDamage } = run(fishAt(), FAR_AWAY, 600);
+  it('never runs at all while the boat stays out of range', () => {
+    // Task 1.10 replaced the old version of this, which asserted the fish did
+    // nothing whatsoever. It is busy the whole time now; what it is not doing is
+    // reaching across the lane with an attack that cannot get there.
+    const { kinds, totalDamage } = run(fishAt(), FAR_AWAY, 600);
 
-    expect(fish.attackPhase).toBe('idle');
+    expect(kinds.has('close')).toBe(false);
     expect(totalDamage).toBe(0);
   });
 
@@ -118,7 +199,7 @@ describe('stepClosePunisher: committing to an attack', () => {
   });
 });
 
-describe('stepClosePunisher: the phases', () => {
+describe('the close punisher: the phases', () => {
   it('holds the wind-up for exactly its duration', () => {
     const started = run(fishAt(), ON_TOP, 1).fish;
 
@@ -174,7 +255,7 @@ describe('stepClosePunisher: the phases', () => {
   });
 });
 
-describe('stepClosePunisher: commitment', () => {
+describe('the close punisher: commitment', () => {
   it('resolves an attack the boat has already run away from', () => {
     // architecture.md section 9 asks for this by name and design.md section 3
     // calls it non-negotiable: a wind-up that started always finishes.
@@ -201,7 +282,7 @@ describe('stepClosePunisher: commitment', () => {
   });
 });
 
-describe('stepClosePunisher: landing the hit', () => {
+describe('the close punisher: landing the hit', () => {
   it('takes the configured damage once', () => {
     const { totalDamage, hits } = run(
       fishAt(),
@@ -242,5 +323,265 @@ describe('stepClosePunisher: landing the hit', () => {
     const { totalDamage } = run(opened, FAR_AWAY, FISH_CLOSE_ACTIVE_TICKS);
 
     expect(totalDamage).toBe(0);
+  });
+});
+
+describe('the far punisher: committing to a volley', () => {
+  it('winds up as soon as the boat is out of range', () => {
+    const { fish } = run(fishAt(), FAR_AWAY, 1);
+
+    expect(fish.attackPhase).toBe('windUp');
+    expect(fish.attackKind).toBe('far');
+    expect(fish.attackPhaseTicksRemaining).toBe(FISH_FAR_WINDUP_TICKS);
+  });
+
+  it('answers a boat standing flush with the edge of the close hitbox', () => {
+    const { fish } = run(fishAt(), ON_TOP + CLOSE_PUNISHER_REACH, 1);
+
+    expect(fish.attackKind).toBe('far');
+  });
+
+  it('runs one attack at a time and never both', () => {
+    // Two phase machines would allow a fish half way through a lunge and a
+    // volley at once. One machine plus one kind is what makes that unspellable,
+    // and the mirrored triggers are what stop it ever being asked for.
+    const { kinds } = run(fishAt(), FAR_AWAY, 600);
+
+    expect([...kinds]).toEqual(['far']);
+  });
+
+  it('resolves a volley the boat has since closed in on', () => {
+    // The same commitment the close punisher has, from the other direction: a
+    // player who sprints in after the tell starts still eats the volley, and the
+    // fish does not switch to the attack that suits the new distance.
+    const started = run(fishAt(), FAR_AWAY, 1).fish;
+    const { fish, spawned } = run(
+      started,
+      ON_TOP,
+      FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+    );
+
+    expect(fish.attackKind).toBe('far');
+    expect(fish.attackPhase).toBe('recovery');
+    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+  });
+
+  it('does not shorten or extend the wind-up based on where the boat is', () => {
+    const started = run(fishAt(), FAR_AWAY, 1).fish;
+
+    expect(
+      run(started, ON_TOP, FISH_FAR_WINDUP_TICKS - 1).fish.attackPhase,
+    ).toBe('windUp');
+    expect(run(started, ON_TOP, FISH_FAR_WINDUP_TICKS).fish.attackPhase).toBe(
+      'active',
+    );
+  });
+});
+
+describe('the far punisher: the volley', () => {
+  /** One tick to leave idle, then the whole tell. */
+  const OPENED = 1 + FISH_FAR_WINDUP_TICKS;
+
+  it('fires the configured number of shots and no more', () => {
+    const { spawned } = run(fishAt(), FAR_AWAY, OPENED + FISH_FAR_ACTIVE_TICKS);
+
+    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+  });
+
+  it('spaces them by the configured interval', () => {
+    const { spawnTicks } = run(
+      fishAt(),
+      FAR_AWAY,
+      OPENED + FISH_FAR_ACTIVE_TICKS,
+    );
+
+    // The first leaves on the first tick the fish actually spends in the active
+    // phase, the same tick the close punisher's hitbox first gets tested on, so
+    // the two attacks measure their durations the same way.
+    expect(spawnTicks[0]).toBe(OPENED);
+    for (let i = 1; i < spawnTicks.length; i++) {
+      expect(spawnTicks[i] - spawnTicks[i - 1]).toBe(
+        FISH_FAR_SHOT_INTERVAL_TICKS,
+      );
+    }
+  });
+
+  it('fires them from the fish itself, thrown at the boat', () => {
+    const fish = fishAt();
+    const { spawned } = run(fish, FAR_AWAY, OPENED + FISH_FAR_ACTIVE_TICKS);
+
+    for (const shot of spawned) {
+      expect(shot.x).toBe(fish.x);
+      expect(shot.depth).toBe(fish.depth);
+      // Left alone, the lob puts it on the boat by the time it surfaces. Without
+      // that a shot could only reach as far as its tracking cap carried it and a
+      // boat across the lane would be safe standing still.
+      expect(shot.x + shot.vx * shotFlightTicks(shot.depth)).toBeCloseTo(
+        FAR_AWAY,
+      );
+    }
+  });
+
+  it('holds each phase for exactly its own duration', () => {
+    const started = run(fishAt(), FAR_AWAY, 1).fish;
+
+    expect(
+      run(started, FAR_AWAY, FISH_FAR_WINDUP_TICKS - 1).fish.attackPhase,
+    ).toBe('windUp');
+
+    const opened = run(started, FAR_AWAY, FISH_FAR_WINDUP_TICKS).fish;
+    expect(opened.attackPhase).toBe('active');
+    expect(opened.attackPhaseTicksRemaining).toBe(FISH_FAR_ACTIVE_TICKS);
+
+    const recovering = run(opened, FAR_AWAY, FISH_FAR_ACTIVE_TICKS).fish;
+    expect(recovering.attackPhase).toBe('recovery');
+    expect(recovering.attackPhaseTicksRemaining).toBe(FISH_FAR_RECOVERY_TICKS);
+  });
+
+  it('reloads its own cooldown rather than the close punisher’s', () => {
+    const recovering = run(
+      fishAt(),
+      FAR_AWAY,
+      OPENED + FISH_FAR_ACTIVE_TICKS,
+    ).fish;
+    const idle = run(recovering, FAR_AWAY, FISH_FAR_RECOVERY_TICKS).fish;
+
+    expect(idle.attackPhase).toBe('idle');
+    expect(idle.attackKind).toBe(null);
+    expect(idle.attackCooldownRemaining).toBe(FISH_FAR_COOLDOWN_TICKS);
+    expect(idle.attackCooldownRemaining).not.toBe(FISH_CLOSE_COOLDOWN_TICKS);
+  });
+
+  it('comes back round to a fresh wind-up after exactly one cycle', () => {
+    const cycle =
+      FISH_FAR_WINDUP_TICKS +
+      FISH_FAR_ACTIVE_TICKS +
+      FISH_FAR_RECOVERY_TICKS +
+      FISH_FAR_COOLDOWN_TICKS;
+    const { fish, spawned } = run(fishAt(), FAR_AWAY, 1 + cycle);
+
+    expect(fish.attackPhase).toBe('windUp');
+    expect(fish.attackPhaseTicksRemaining).toBe(FISH_FAR_WINDUP_TICKS);
+    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+  });
+});
+
+describe('shots in flight', () => {
+  /** Ticks from the fish's starting depth to the surface. */
+  const FLIGHT = shotFlightTicks(FISH_START_DEPTH);
+
+  it('lands where the boat was standing when it was fired', () => {
+    // The lob on its own, with the boat gone from the place it was aimed at, so
+    // what is being measured is only where it was thrown. This is what lets the
+    // volley reach a boat parked across the lane at all.
+    const target = ON_TOP - 200;
+    const thrown: ProjectileState = {
+      x: ON_TOP,
+      depth: FISH_START_DEPTH,
+      vx: (target - ON_TOP) / FLIGHT,
+    };
+
+    let shots = [thrown];
+    for (let i = 0; i < FLIGHT - 1; i++) {
+      // Well beyond the tracking cap's reach in the time available, so the
+      // correction is pinned against it the whole way and cannot be what carries
+      // the shot to its target.
+      shots = stepProjectiles(shots, ON_TOP + 400).projectiles;
+    }
+
+    // Measured on the last tick before it resolves, so one lob step is still
+    // outstanding on top of the correction it has been pulled away by. Without
+    // the lob it would still be sitting within fifty units of the fish, which is
+    // two hundred short of where it needs to be.
+    const slack = FLIGHT * FISH_FAR_TRACK_PER_TICK + Math.abs(thrown.vx);
+    expect(shots[0]?.x).toBeGreaterThan(target);
+    expect(shots[0]?.x).toBeLessThan(target + slack);
+  });
+
+  it('climbs at the configured rate', () => {
+    const { projectiles } = fly([shotAt(ON_TOP)], ON_TOP, 1);
+
+    expect(projectiles[0]?.depth).toBeCloseTo(
+      FISH_START_DEPTH - FISH_FAR_RISE_PER_TICK,
+    );
+  });
+
+  it('stays in the air for the whole climb, then resolves', () => {
+    // The warning the player actually gets is the wind-up plus this, which is
+    // why the wind-up is allowed to be shorter than the close punisher's.
+    expect(fly([shotAt(ON_TOP)], ON_TOP, FLIGHT - 1).projectiles).toHaveLength(
+      1,
+    );
+
+    const arrived = fly([shotAt(ON_TOP)], ON_TOP, FLIGHT);
+    expect(arrived.projectiles).toHaveLength(0);
+    expect(arrived.totalDamage).toBe(FISH_FAR_HULL_DAMAGE);
+  });
+
+  it('corrects towards the boat more slowly than the boat can walk', () => {
+    // The inequality the whole attack is built on: walking always outruns the
+    // correction, so the volley is answered by reading it rather than by
+    // spending a dash. Pinned as an inequality rather than as a value so the
+    // 1.13 tuning pass cannot break it by moving either number.
+    expect(FISH_FAR_TRACK_PER_TICK).toBeLessThan(BOAT_SPEED_PER_TICK);
+
+    // Fired straight up, so the correction is the only thing moving it.
+    const { projectiles } = fly([shotAt(ON_TOP)], FAR_AWAY, 1);
+    expect(projectiles[0]?.x).toBeCloseTo(ON_TOP - FISH_FAR_TRACK_PER_TICK);
+  });
+
+  it('never oversteers past the boat', () => {
+    const nearly = ON_TOP + FISH_FAR_TRACK_PER_TICK / 2;
+    const { projectiles } = fly([shotAt(nearly)], ON_TOP, 1);
+
+    expect(projectiles[0]?.x).toBeCloseTo(ON_TOP);
+  });
+
+  it('catches a boat inside its reach and lets one outside it go', () => {
+    // Fired from one tick below the surface, so there is exactly one drift step
+    // to account for and the boundary can be checked a whole unit either side of
+    // itself rather than on top of accumulated arithmetic.
+    //
+    // The shot closes FISH_FAR_TRACK_PER_TICK on that last tick, so a boat that
+    // much further out is still caught by it. Strict at the edge, the same as
+    // the close punisher's hitbox: a shot the player can see they are clear of
+    // must not cost them anything.
+    const arriving = shotAt(ON_TOP, FISH_FAR_RISE_PER_TICK);
+    const edge = FAR_SHOT_REACH + FISH_FAR_TRACK_PER_TICK;
+
+    expect(fly([arriving], ON_TOP + edge - 1, 1).totalDamage).toBe(
+      FISH_FAR_HULL_DAMAGE,
+    );
+    expect(fly([arriving], ON_TOP + edge + 1, 1).totalDamage).toBe(0);
+  });
+
+  it('never catches a boat that walked away as it was fired', () => {
+    // design.md section 3 asks for a volley that is trivially sidestepped. This
+    // is that sentence as a test: one direction held from the moment of the shot
+    // and nothing lands, without a dash being spent.
+    let shots = [shotAt(ON_TOP)];
+    let boatX = ON_TOP;
+    let totalDamage = 0;
+
+    for (let i = 0; i < FLIGHT; i++) {
+      boatX -= BOAT_SPEED_PER_TICK;
+      const result = stepProjectiles(shots, boatX);
+      shots = result.projectiles;
+      totalDamage += result.hullDamage;
+    }
+
+    expect(totalDamage).toBe(0);
+  });
+
+  it('charges the hull once for every shot that lands', () => {
+    const volley = Array.from({ length: FISH_FAR_SHOT_COUNT }, () =>
+      shotAt(ON_TOP),
+    );
+    const arrived = fly(volley, ON_TOP, FLIGHT);
+
+    expect(arrived.projectiles).toHaveLength(0);
+    expect(arrived.totalDamage).toBe(
+      FISH_FAR_SHOT_COUNT * FISH_FAR_HULL_DAMAGE,
+    );
   });
 });

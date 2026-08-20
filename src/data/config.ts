@@ -218,12 +218,119 @@ export const FISH_CLOSE_HULL_DAMAGE = 25;
 export const FISH_CLOSE_HITBOX_WIDTH = 60;
 
 /**
+ * The fish's far punisher, a slow tracking volley. Chosen 2026-08-20, see
+ * decisions.md.
+ *
+ * The other half of design.md section 3's no-safe-camping-spot rule: without it
+ * the best place to stand is across the lane, chipping away at the damage floor
+ * in complete safety, and the movement axis only matters in one direction.
+ *
+ * design.md section 3 asks for it to be "trivially sidestepped up close, hard to
+ * read from across the screen". Both halves of that are bought with the same two
+ * numbers below: the shots rise slowly, so the warning is the wind-up plus the
+ * whole flight, and they steer at well under walking pace, so a player who reads
+ * the tell walks out of the way without spending anything.
+ *
+ * Durations in ticks, for the same reason the close punisher's are: a telegraph
+ * is reasoned about in frames.
+ */
+export const FISH_FAR_WINDUP_TICKS = 40;
+export const FISH_FAR_RECOVERY_TICKS = 30;
+
+/**
+ * The volley. Three shots spaced far enough apart that one lazy sidestep does
+ * not clear all of them, which is what makes it a volley rather than three
+ * copies of the same dodge.
+ *
+ * The active duration is derived from the two: shots fire on the first tick and
+ * every interval after it, so the phase lasts until the last one has left. A
+ * fourth constant here could disagree with them.
+ */
+export const FISH_FAR_SHOT_COUNT = 3;
+export const FISH_FAR_SHOT_INTERVAL_TICKS = 15;
+export const FISH_FAR_ACTIVE_TICKS =
+  (FISH_FAR_SHOT_COUNT - 1) * FISH_FAR_SHOT_INTERVAL_TICKS + 1;
+
+/**
+ * The gap after the volley before the fish may commit to anything again. Longer
+ * than the close punisher's 60, because the shots are still in the air during
+ * it: the fish being idle is not the same as the attack being over.
+ */
+export const FISH_FAR_COOLDOWN_TICKS = 90;
+
+/**
+ * How fast a shot climbs towards the surface, and how fast it may drift
+ * sideways chasing the boat.
+ *
+ * Authored per second with the per-tick values derived from TICK_HZ, same as the
+ * boat's speed and the stamina refill.
+ *
+ * 72 a second is 1.2 units a tick, so from the fish's starting depth of 100 a
+ * shot is in the air for 84 ticks. With the 40-tick wind-up in front of it that
+ * is about two seconds of warning, and it scales with depth for free: once the
+ * AI owns depth at task 1.11, a deep fish telegraphs further ahead and a shallow
+ * one gives barely any notice.
+ *
+ * 36 a second of tracking is 40% of the 90 the boat walks at. That inequality is
+ * the whole design of the attack and a test pins it: walking always outruns the
+ * correction, so the volley is answered by reading it rather than by spending a
+ * dash, while a player who only shuffles gets followed.
+ *
+ * Tracking is a correction on top of the lob each shot is thrown with, not the
+ * whole of its aim. A shot left alone lands where the boat was standing when it
+ * was fired, from anywhere on the lane; the cap is how far it is allowed to
+ * follow the player from there, about 50 units over a full flight. Tracking
+ * alone could never cross the lane, and a volley that could not reach a boat
+ * parked across it would leave exactly the safe camping spot design.md section 3
+ * forbids.
+ *
+ * Both are pinned by tests, the tracking one as an inequality against the boat's
+ * walking speed rather than as a value, so a retune during task 1.13 cannot
+ * quietly turn the volley into something only a dash answers.
+ */
+export const FISH_FAR_RISE_PER_SECOND = 72;
+export const FISH_FAR_RISE_PER_TICK = FISH_FAR_RISE_PER_SECOND / TICK_HZ;
+export const FISH_FAR_TRACK_PER_SECOND = 36;
+export const FISH_FAR_TRACK_PER_TICK = FISH_FAR_TRACK_PER_SECOND / TICK_HZ;
+
+/**
+ * What one shot takes off the hull, and how wide it is.
+ *
+ * 8 against the default boat's 100, so a whole volley eaten is 24, about one
+ * close punisher. Deliberately cheaper per hit than the close punisher's 25: a
+ * single shot is a scratch that says "move", and it is only camping across the
+ * lane and ignoring all of them that ends a fight.
+ *
+ * The hull is 24 wide against a 10-wide shot, so the boat is clear 17 units
+ * away, which is 11 ticks of walking. Trivially sidestepped, exactly as
+ * design.md section 3 asks, provided the tell was read.
+ */
+export const FISH_FAR_HULL_DAMAGE = 8;
+export const FISH_FAR_SHOT_WIDTH = 10;
+/** Square, so a shot cannot be mistaken for a small boat or a small fish. */
+export const FISH_FAR_SHOT_HEIGHT = 10;
+
+/**
+ * How far outside the fish its far-punisher tell is drawn.
+ *
+ * The close punisher owns a column of water and is telegraphed on it. The far
+ * punisher owns nothing until the shots exist, so its tell goes on the fish, and
+ * it has to be a plainly different shape from the column rather than a variation
+ * on it: the two reads ask for opposite movements.
+ */
+export const FISH_FAR_TELL_PADDING = 4;
+
+/**
  * The telegraph. Outlined during the wind-up, filled solid while the hitbox is
  * live, absent otherwise.
  *
  * Kept clear of COLOUR_BAR_RESISTANCE above, which is also red: one of them is
  * information about the fish's health and the other is about to take a quarter
  * of the hull off, and they must not be confused at a glance.
+ *
+ * The far punisher's shots are drawn in it too. One colour means danger in the
+ * grey box, whatever shape it happens to be in, so the player learns to read the
+ * colour rather than a vocabulary of them.
  */
 export const COLOUR_TELEGRAPH = 0xe07a3c;
 
