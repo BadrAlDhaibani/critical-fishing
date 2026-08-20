@@ -13,34 +13,35 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.10, the far punisher. Signed off 2026-08-20 on the
-  playtest, not retuned. 151 tests pass; lint, format and build are clean.
-- **In a half state:** nothing.
-- **Next task:** 1.11, distance bands. Two bands with hysteresis, the fish
-  selecting attacks by band and repositioning with intent.
+- **Last completed task:** 1.11, distance bands. Tests, lint, format and build
+  are clean at 188 tests. **Not yet playtested**, so it is not closed: the second
+  gate in CLAUDE.md's definition of done is still open.
+- **In a half state:** nothing in the code. 1.11 is awaiting Badr's playtest.
+- **Next task:** 1.12, win and lose states. Hull to zero loses, resistance to
+  zero wins and enters a stub reel-in sequence. _Context: design.md section 2._
   1.2c is still open and still not gameplay-blocking.
-- **What 1.11 has to ask for and must not invent.** The band edges and the
-  hysteresis margin, both still open in design.md section 8, and whatever
-  numbers the repositioning needs: how fast the fish swims horizontally, how
-  fast it rises and dives, and what depth it wants in each band. Do not derive
-  any of them from `CLOSE_PUNISHER_REACH` just because it happens to be the
-  boundary today.
-- **What 1.11 inherits and must not quietly undo.** The two mirrored triggers
-  are 1.11's to replace: `closePunisherHits` doubling as the close punisher's
-  commit test stays, but `farPunisherFires` exists only because there were no
-  bands, and band selection is what retires it. Everything else from 1.10 below
-  is settled. Expect 1.11 to change how the far punisher _feels_ without
-  touching a single one of its numbers, because flight time is derived from
-  depth: a fish that dives lengthens its own telegraph and a fish that surfaces
-  shortens it. Judge the volley again after depth moves, before retuning it.
-- **Where the fish's code lives.** `sim/ai/patterns.ts`, per architecture.md
-  section 2. Still hard-coded patterns for one grey box fish: task 3.1 extracts
-  fish into data files, and writing that definition format now is building ahead
-  of the roadmap. The field names in there already match the architecture.md
-  section 4 sketch so the extraction is a move rather than a rewrite. Nothing has
-  an `id`, a `weight` or a `punishes` yet, deliberately. The one concession is a
-  local `TIMINGS` record keyed by attack kind, which exists so the phase machine
-  is written once rather than once per attack, and is not a definition format.
+- **What the 1.11 playtest is looking for**, before anything is retuned:
+  - The `tether` line in the readout now names the band. It should flip to close
+    at roughly 75 horizontal from a resting fish and not flip back until roughly
+    147, and it must not chatter when walking slowly across either edge.
+  - Closing in should read as the fish rising to meet you and then gliding
+    underneath. Walking away must visibly outpace it.
+  - **Judge the volley again before touching one of its numbers.** Flight time is
+    derived from depth, so a volley from the resting station is 1.10's 84-tick
+    flight and one from a risen fish is 42 and much sharper. Nothing about either
+    attack was retuned at 1.11, deliberately.
+  - The close punisher's column must stay put for the whole wind-up.
+- **Where the fish's code lives.** `sim/ai/patterns.ts` runs the attacks and
+  `sim/ai/bands.ts` chooses and repositions, per architecture.md section 2.
+  `sim/distance.ts` owns `bandFor` and its hysteresis. Still hard-coded for one
+  grey box fish: task 3.1 extracts fish into data files, and writing that
+  definition format now is building ahead of the roadmap. The field names already
+  match the architecture.md section 4 sketch so the extraction is a move rather
+  than a rewrite. Nothing has an `id`, a `weight` or a `punishes` yet,
+  deliberately. Two concessions: a local `TIMINGS` record keyed by attack kind,
+  so the phase machine is written once rather than once per attack, and
+  `attackForBand`, which is a one-to-one mapping today and becomes the thing that
+  reads a fish definition's weighted list at 3.1.
 - **Numbers settled so far.** All of these answer parts of design.md section 8
   and must not be re-invented or quietly retuned outside task 1.13:
   - Default boat hull 100, default line stamina pool 80, grey box fish
@@ -58,6 +59,9 @@ Update this block at the end of every batch. Keep it to a few lines.
   - Far punisher: 40 wind-up, 3 shots one every 15 ticks, 30 recovery, 90
     cooldown. 8 hull damage a shot, 24 for a whole volley. Shots climb at 72 u/s
     and correct at 36 u/s, 10 units wide. Full cycle 191 ticks, 3.2 seconds.
+    Flight time is **not** a constant: it is the depth the shot was fired from
+    divided by the climb, so it is 84 ticks from the resting station and 42 from
+    a risen fish.
     Each shot is **lobbed** at where the boat stood when it fired, with the
     correction on top: tracking alone closes only about 50 units in a flight and
     could never reach a boat across the lane. The correction staying under the
@@ -65,13 +69,48 @@ Update this block at the end of every batch. Keep it to a few lines.
     pins that inequality rather than the values.
   - **The dash grants no invulnerability frames.** Decided at 1.9 and pinned by
     a test. It buys 55 units of distance and nothing else.
-- **Carried out of 1.10, needed before 1.11:**
-  - **There is no longer anywhere on the lane where nothing happens.** The two
-    triggers are exact opposites, so the fish always answers. Three tests that
-    parked the boat somewhere quiet had to be rewritten, and `tests/fight.test.ts`
-    now has a `quietFish()` helper that seeds a cooldown the fish will not
-    finish. Use it for anything measuring the boat's own resources; a test that
-    needs the fish silent cannot get there by standing somewhere.
+  - Bands: edge 140 on line length, hysteresis 15, resting depth 100 in the far
+    band and 50 in the close one, swimming 36 u/s and rising 30 u/s. Two
+    inequalities between those are pinned by tests rather than the values: the
+    far resting depth stays at or under `edge - hysteresis`, and the close band
+    is horizontally wider than the hitbox at its centre. See decisions.md for
+    what breaks if either goes.
+- **Carried out of 1.11, still true:**
+  - **Bands are cut out of line length, which includes depth**, not out of
+    horizontal distance. The fish's own depth therefore moves it between bands.
+    Do not "simplify" it to `Math.abs`; decisions.md records what that costs.
+  - **`band` is the only part of the fight's geometry stored on the state.**
+    Everything else is derived on demand. It is stored because hysteresis means
+    the answer depends on the previous answer, and `createFightState` **seeds**
+    it rather than computing it, because the opening line of 141 sits inside the
+    margin where `bandFor` has nothing of its own to say.
+  - **The band picks which attack, the hitbox still picks whether.**
+    `closePunisherHits` doubles as the close punisher's commit test exactly as it
+    did at 1.9. In the close band with the boat out of the box the fish commits
+    to nothing and swims instead, and its cooldown is **held at zero rather than
+    reloaded** so patience costs it nothing and it swings the tick it arrives.
+    `farPunisherFires` is gone.
+  - **The fish repositions only while idle.** Frozen through wind-up, active and
+    recovery. Not the commitment rule, a choice on top of it, and decisions.md
+    gives the two reasons. design.md section 3's "rises while winding up
+    something slow" is deliberately deferred to an attack designed around it.
+  - **It closes on the boat in the close band and holds station in the far one.**
+    Holding station is deliberate: the volley already reaches the whole lane.
+  - **`FISH_START_DEPTH` is `FISH_FAR_BAND_DEPTH`**, so the fish opens the fight
+    at the resting station of the band it opens in and nothing drifts on tick
+    one. Several tests depend on that, including `quietFish()` below.
+  - Nothing clamps the fish to the lane and nothing needs to: it only ever moves
+    towards the boat's x and never past it, and the boat is already clamped.
+- **Carried out of 1.10, still true:**
+  - **There is nowhere on the lane the fish ignores you.** 1.10 made the two
+    triggers exact opposites; 1.11 replaced them with bands that still cover the
+    lane between them. The one position that commits no attack is the close band
+    outside the hitbox, and the fish spends it swimming at you, so it is not
+    quiet either. `tests/fight.test.ts` has a `quietFish()` helper that seeds a
+    cooldown the fish will not finish; use it for anything measuring the boat's
+    own resources. Since 1.11 it silences the **attacking** only: a quiet fish
+    still repositions, so it holds still only while the boat stays in the far
+    band. Send test boats left.
   - **One phase machine, one cooldown, plus `fish.attackKind`.** Both attacks run
     through the same `stepFishAttack`, and the cooldown loaded when a recovery
     ends belongs to the attack that just ran. A non-idle phase with a null kind
@@ -84,10 +123,10 @@ Update this block at the end of every batch. Keep it to a few lines.
     close punisher can start underneath its own shots, which the test seeds by
     hand because it is not reachable from the opening position (recovery plus
     cooldown is 120 ticks against an 84-tick flight).
-  - **Flight time is derived from depth**, `shotFlightTicks`, so 1.11 changes the
-    attack's whole feel by moving the fish rather than by retuning it. A deep
-    fish telegraphs further ahead and lobs shots that travel longer, which is
-    also the case where shots outlive the cooldown.
+  - **Flight time is derived from depth**, `shotFlightTicks`, which is why 1.11
+    changed the attack's whole feel without retuning it. A deep fish telegraphs
+    further ahead and lobs shots that travel longer, which is also the case where
+    shots outlive the cooldown.
   - The far punisher's tell is an outline **on the fish**, not a column, because
     it owns no column of water. Deliberately a different shape from the close
     punisher's box rather than a variation on it: the two ask for opposite
@@ -98,13 +137,9 @@ Update this block at the end of every batch. Keep it to a few lines.
     a shot that just landed into one just fired. Judged fine at the 1.10
     playtest: at 1.2 units a tick it does not read as stutter. If a later change
     speeds the shots up, look at this again.
-  - The readout now shows `far:windUp 12` style labels and a `shots` count.
+  - The readout shows `far:windUp 12` style labels, a `shots` count and, since
+    1.11, the band next to the tether.
 - **Carried out of 1.9, still true:**
-  - **The fish only commits when the boat is already in range, and the range is
-    the hitbox itself.** One predicate, `closePunisherHits`, answers both "does
-    this connect" and "is it worth starting". That is deliberate and is what
-    stops the trigger drifting into a second tuned number. It is also why the
-    telegraph appearing is always the player's own doing.
   - `CLOSE_PUNISHER_REACH` is **derived**, half the hitbox plus half the hull,
     because the box catches an overlapping boat rather than only a boat whose
     centre is inside it. Do not turn it into a third tunable.
@@ -123,7 +158,10 @@ Update this block at the end of every batch. Keep it to a few lines.
     for more than about 39 ticks is inside the box and taking hull damage. Two
     purity tests moved to `LEFT` for this reason, one of which had been passing
     only by coincidence. If a test needs the boat far from the fish for a long
-    run, send it left.
+    run, send it left. Since 1.11 that is truer still: about 17 ticks of `RIGHT`
+    is enough to pull the fish into the close band, after which it rises and
+    starts closing, and a test that wanted a fish standing still no longer has
+    one.
   - The old "leaves the hull alone entirely, since nothing damages it yet" test
     is gone. Its 1.9 replacement held the boat away from the fish, and 1.10
     retired that too: see `quietFish()` above.
@@ -199,12 +237,18 @@ Update this block at the end of every batch. Keep it to a few lines.
   - Fish depth is units below the waterline, not a screen y. `sim/` never sees
     `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
 - **Noticed but not acted on:**
-  - `stepFight` now names sixteen fields plus a list, and reads as five stacked
-    concerns: movement, the player's attack, the pool, the shots, and the fish.
-    1.11 adds a sixth. Splitting the boat and fish halves into two functions that
-    `stepFight` composes is the obvious move and is a task of its own; it was
-    deliberately not slipped into 1.10 and should not be slipped into 1.11
-    either.
+  - `stepFight` now names eighteen fields plus a list, and reads as six stacked
+    concerns: movement, the band and the fish's repositioning, the player's
+    attack, the pool, the shots, and the fish's attack. Splitting the boat and
+    fish halves into two functions that `stepFight` composes is the obvious move
+    and is a task of its own. It was deliberately not slipped into 1.10 or 1.11
+    and is getting harder to keep out; propose it rather than doing it.
+  - The order inside `stepFight` is load bearing and is not obvious from reading
+    it. The band is read against the fish's position at the **top** of the tick,
+    because repositioning needs a band before it can move; the player's damage is
+    then priced against the position the fish has **just** moved to, so both
+    sides of the line are this tick's. The difference is under a unit either way,
+    but several tests are exact about it.
   - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
     readings still have not been taken**, so the diagnosis has not started.
     Cheapest to grab during any future playtest: `devicePixelRatio`,
@@ -274,7 +318,7 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
       _Context: design.md section 3._
 - [x] **1.10 Fish attack: far punisher.** Slow tracking volley.
       _Context: design.md section 3._
-- [ ] **1.11 Distance bands.** Two bands with hysteresis, fish selects attacks
+- [x] **1.11 Distance bands.** Two bands with hysteresis, fish selects attacks
       by band and repositions with intent.
       _Context: design.md section 3, architecture.md section 4._
 - [ ] **1.12 Win and lose states.** Hull to zero loses. Resistance to zero wins

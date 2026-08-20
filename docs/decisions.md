@@ -559,3 +559,89 @@ aiming at launch with no tracking at all, a separate minimum range for the far
 punisher with a dead band between the two attacks, firing on a metronome
 regardless of where the boat is, and holding the fish busy until the last shot of
 its volley lands.
+
+## 2026-08-20: Two bands at 140 ±15, the fish resting at depth 100 and rising to 50
+
+The last of design.md section 8's fight geometry, and the task that retires the
+mirrored triggers 1.9 and 1.10 stood in for attack selection with.
+
+**Bands are cut out of line length, which is euclidean and includes depth.** Not
+out of horizontal distance. This follows the 2026-08-19 entry above: depth has to
+be a leg of the number the fight hangs off, or the fish's vertical axis is
+cosmetic. Cutting bands out of it means the fish's own depth moves it between
+bands, so diving is a real retreat and rising is a real commitment rather than a
+change of costume. Rejected: horizontal-only bands, which are simpler and have no
+geometric trap in them, but which reduce depth to a damage-and-telegraph modifier
+and leave the fish with no way to answer position with position.
+
+**Edge 140, hysteresis 15. Resting depth 100 in the far band, 50 in the close
+one.** In units that can be felt: a boat gets within about 75 horizontal of a
+resting fish to pull it into the close band, and has to get about 147 away to
+push it back out. The asymmetry is not a mistake. The fish rising shortens the
+line by itself, so committing to being close is harder to undo than it was to
+provoke, which is what makes closing a decision rather than a toggle. The
+hysteresis on top is design.md section 3's second fairness rule: standing on a
+boundary must not make the fish flicker between movesets.
+
+The four numbers only make sense as a set, and two inequalities between them are
+pinned by tests rather than the values being pinned:
+
+- The far resting depth must stay at or under `edge - hysteresis`. A boat
+  directly overhead is exactly `depth` away, so a fish resting deeper than that
+  could dive out of the close band permanently and never be lunged at once. That
+  is design.md section 3's no-safe-camping-spot rule broken from the fish's side
+  of it, and it is the trap the euclidean bands bring with them.
+- The close band has to be horizontally wider than the hitbox at its centre, 75
+  against 42, or the band edge is decoration and the approach below has no ground
+  to cover.
+
+**The close punisher's commit test did not change.** `closePunisherHits` still
+answers both "does this connect" and "is it worth starting". The band picks
+_which_ attack; the hitbox still picks _whether_. A fish in the close band with
+the boat out of the box commits to nothing, and its cooldown is held at zero
+rather than reloaded, so patience costs it nothing and it swings on the very tick
+its approach arrives. `farPunisherFires` is deleted: the far band selects the
+volley, and the volley needs no range of its own because it is aimed at wherever
+the boat is and reaches.
+
+**The fish closes on the boat in the close band and holds station in the far
+one.** 36 units a second, 40% of the boat's walking speed, pinned as an
+inequality the same way the volley's tracking cap is: walking always breaks
+contact, so an approaching fish is pressure rather than a trap. The approach
+exists because the close band is much wider than the box at its centre, and
+without it the fish would sit in the gap between the two doing nothing, which is
+the dead spot 1.10 removed from the lane. Holding station in the far band is not
+laziness: the volley already reaches the whole lane, and a fish that chased there
+would walk every fight into a wall. Rejected: drifting towards the boat in both
+bands, which erodes far camping but ends most fights close and retires the
+volley, and no horizontal movement at all, which reopens that dead spot.
+
+**Depth moves 30 a second**, so the fish crosses between its two stations in
+about 1.7 seconds, a little under one attack cycle. It arrives at the depth its
+band wants at roughly the moment it is ready to attack from there.
+
+**It repositions only while idle**, which in practice means during its cooldown.
+design.md section 3's commitment rule is about not cancelling a wind-up rather
+than about not moving during one, so this is a choice on top of it, made for two
+reasons. The close punisher's telegraph is drawn on the column of water above the
+fish, so a fish that drifted during its own tell would drag the hitbox after the
+player and turn a read into a chase. And the far punisher's flight time is
+derived from the depth it fired from, so a fish that rose mid-wind-up would be
+shortening a warning it had already started giving. design.md section 3's "rises
+while winding up something slow" is a real thing to build and belongs to an
+attack designed around it. Rejected: moving through every phase.
+
+Three consequences worth keeping. `FISH_START_DEPTH` is now
+`FISH_FAR_BAND_DEPTH` rather than its own 100, because they are the same fact:
+the fish opens the fight at the resting station of the band it opens in, so
+nothing drifts on tick one. The opening band is **seeded** rather than computed,
+because the opening line of 141 units sits inside the hysteresis margin where
+`bandFor` has no answer of its own to give. And `band` is the only thing about
+the fight's geometry that is stored on the state rather than derived on demand,
+which is exactly what hysteresis means: the answer depends on the previous
+answer.
+
+Nothing about either attack was retuned, deliberately. The far punisher already
+feels different because its flight time comes from the depth it fired from: a
+volley from the resting station is the 84-tick flight of 1.10, and one from a
+risen fish is 42 and much sharper. Judge that before touching its numbers.

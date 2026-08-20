@@ -3,7 +3,6 @@ import {
   CLOSE_PUNISHER_REACH,
   FAR_SHOT_REACH,
   closePunisherHits,
-  farPunisherFires,
   shotFlightTicks,
   stepFishAttack,
   stepProjectiles,
@@ -46,6 +45,16 @@ function fishAt(overrides: Partial<FishState> = {}): FishState {
 const ON_TOP = createFightState().fish.x;
 /** Comfortably outside the hitbox, and outside it by more than one dash. */
 const FAR_AWAY = ON_TOP - 200;
+
+/**
+ * A fish already in the close band, which is what selects the close punisher.
+ *
+ * The band is state and `stepFishAttack` only reads it, so these tests set it
+ * rather than getting there by standing somewhere: `sim/distance.ts` decides
+ * which band a length falls in and `tests/distance.test.ts` is where that is
+ * tested. Everything here is about what the fish does once it has decided.
+ */
+const IN_CLOSE_BAND = { band: 'close' } as const;
 
 interface Run {
   fish: FishState;
@@ -142,41 +151,53 @@ describe('closePunisherHits: the hitbox', () => {
   });
 });
 
-describe('the two triggers', () => {
-  // The reason no attack selection code exists yet. If a dead band ever opened
-  // up between the two, or the far punisher grew a minimum range of its own,
-  // these fail rather than the fish quietly standing still mid-lane.
-  it('cover the whole lane and overlap nowhere', () => {
-    for (let offset = -240; offset <= 240; offset++) {
-      const boatX = ON_TOP + offset;
-      const close = closePunisherHits(ON_TOP, boatX);
-
-      expect(farPunisherFires(ON_TOP, boatX)).toBe(!close);
-    }
-  });
-
-  it('hand the boundary to the far punisher, the same way the hitbox does', () => {
-    expect(farPunisherFires(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH)).toBe(true);
-    expect(farPunisherFires(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH - 1)).toBe(
-      false,
-    );
-  });
-});
-
 describe('the close punisher: committing to an attack', () => {
   it('winds up as soon as the boat is in range', () => {
-    const { fish } = run(fishAt(), ON_TOP, 1);
+    const { fish } = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1);
 
     expect(fish.attackPhase).toBe('windUp');
     expect(fish.attackKind).toBe('close');
     expect(fish.attackPhaseTicksRemaining).toBe(FISH_CLOSE_WINDUP_TICKS);
   });
 
-  it('never runs at all while the boat stays out of range', () => {
-    // Task 1.10 replaced the old version of this, which asserted the fish did
-    // nothing whatsoever. It is busy the whole time now; what it is not doing is
-    // reaching across the lane with an attack that cannot get there.
-    const { kinds, totalDamage } = run(fishAt(), FAR_AWAY, 600);
+  // The band picks which attack; the hitbox still picks whether it is worth
+  // starting. The close band is a good deal wider than the box at its centre, so
+  // this is the ordinary case of being drawn in rather than an edge case, and
+  // what the fish does about it is swim, which `tests/bands.test.ts` covers.
+  it('commits to nothing at all while the boat is out of reach', () => {
+    const { fish, kinds, totalDamage } = run(
+      fishAt(IN_CLOSE_BAND),
+      FAR_AWAY,
+      600,
+    );
+
+    expect(fish.attackPhase).toBe('idle');
+    expect(kinds.size).toBe(0);
+    expect(totalDamage).toBe(0);
+  });
+
+  it('does not swing at a boat flush with the edge of the box', () => {
+    const { fish } = run(
+      fishAt(IN_CLOSE_BAND),
+      ON_TOP + CLOSE_PUNISHER_REACH,
+      1,
+    );
+
+    expect(fish.attackPhase).toBe('idle');
+  });
+
+  it('commits on the very tick the boat comes into reach', () => {
+    // Waiting does not cost a second cooldown. A fish that has spent its whole
+    // gap closing has to swing the moment it arrives, or the approach would buy
+    // the player free time rather than costing them ground.
+    const waited = run(fishAt(IN_CLOSE_BAND), FAR_AWAY, 300).fish;
+
+    expect(waited.attackCooldownRemaining).toBe(0);
+    expect(run(waited, ON_TOP, 1).fish.attackPhase).toBe('windUp');
+  });
+
+  it('never runs while the fish is in the far band, however close the boat', () => {
+    const { kinds, totalDamage } = run(fishAt({ band: 'far' }), ON_TOP, 600);
 
     expect(kinds.has('close')).toBe(false);
     expect(totalDamage).toBe(0);
@@ -185,13 +206,13 @@ describe('the close punisher: committing to an attack', () => {
   it('counts the cooldown down before checking the range, not after', () => {
     // One tick of cooldown left and the boat already in range: the tick that
     // clears the cooldown is also the tick the wind-up starts on.
-    const fish = fishAt({ attackCooldownRemaining: 1 });
+    const fish = fishAt({ ...IN_CLOSE_BAND, attackCooldownRemaining: 1 });
 
     expect(run(fish, ON_TOP, 1).fish.attackPhase).toBe('windUp');
   });
 
   it('waits out a cooldown that has not expired', () => {
-    const fish = fishAt({ attackCooldownRemaining: 10 });
+    const fish = fishAt({ ...IN_CLOSE_BAND, attackCooldownRemaining: 10 });
     const { fish: after } = run(fish, ON_TOP, 9);
 
     expect(after.attackPhase).toBe('idle');
@@ -201,7 +222,7 @@ describe('the close punisher: committing to an attack', () => {
 
 describe('the close punisher: the phases', () => {
   it('holds the wind-up for exactly its duration', () => {
-    const started = run(fishAt(), ON_TOP, 1).fish;
+    const started = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1).fish;
 
     expect(
       run(started, ON_TOP, FISH_CLOSE_WINDUP_TICKS - 1).fish.attackPhase,
@@ -212,7 +233,11 @@ describe('the close punisher: the phases', () => {
   });
 
   it('holds the active frames for exactly their duration', () => {
-    const opened = run(fishAt(), ON_TOP, 1 + FISH_CLOSE_WINDUP_TICKS).fish;
+    const opened = run(
+      fishAt(IN_CLOSE_BAND),
+      ON_TOP,
+      1 + FISH_CLOSE_WINDUP_TICKS,
+    ).fish;
 
     expect(
       run(opened, ON_TOP, FISH_CLOSE_ACTIVE_TICKS - 1).fish.attackPhase,
@@ -224,7 +249,7 @@ describe('the close punisher: the phases', () => {
 
   it('holds the recovery for exactly its duration, then reloads the cooldown', () => {
     const recovering = run(
-      fishAt(),
+      fishAt(IN_CLOSE_BAND),
       ON_TOP,
       1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
     ).fish;
@@ -247,7 +272,7 @@ describe('the close punisher: the phases', () => {
 
     // One tick to leave idle, then the whole cycle lands the fish back in a
     // wind-up that has just started, having hit once on the way round.
-    const { fish, hits } = run(fishAt(), ON_TOP, 1 + cycle);
+    const { fish, hits } = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1 + cycle);
 
     expect(fish.attackPhase).toBe('windUp');
     expect(fish.attackPhaseTicksRemaining).toBe(FISH_CLOSE_WINDUP_TICKS);
@@ -259,7 +284,7 @@ describe('the close punisher: commitment', () => {
   it('resolves an attack the boat has already run away from', () => {
     // architecture.md section 9 asks for this by name and design.md section 3
     // calls it non-negotiable: a wind-up that started always finishes.
-    const started = run(fishAt(), ON_TOP, 1).fish;
+    const started = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1).fish;
     const { fish, totalDamage } = run(
       started,
       FAR_AWAY,
@@ -271,7 +296,7 @@ describe('the close punisher: commitment', () => {
   });
 
   it('does not shorten or extend the wind-up based on where the boat is', () => {
-    const started = run(fishAt(), ON_TOP, 1).fish;
+    const started = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1).fish;
 
     expect(
       run(started, FAR_AWAY, FISH_CLOSE_WINDUP_TICKS - 1).fish.attackPhase,
@@ -285,7 +310,7 @@ describe('the close punisher: commitment', () => {
 describe('the close punisher: landing the hit', () => {
   it('takes the configured damage once', () => {
     const { totalDamage, hits } = run(
-      fishAt(),
+      fishAt(IN_CLOSE_BAND),
       ON_TOP,
       1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
     );
@@ -297,7 +322,11 @@ describe('the close punisher: landing the hit', () => {
   it('hits a boat that walks in after the hitbox has opened', () => {
     // The box is drawn solid for several ticks, so it has to be live for all of
     // them. Otherwise walking into a visible hitbox costs nothing.
-    const opened = run(fishAt(), ON_TOP, 1 + FISH_CLOSE_WINDUP_TICKS).fish;
+    const opened = run(
+      fishAt(IN_CLOSE_BAND),
+      ON_TOP,
+      1 + FISH_CLOSE_WINDUP_TICKS,
+    ).fish;
     const grazed = run(opened, FAR_AWAY, 1).fish;
 
     expect(grazed.attackPhase).toBe('active');
@@ -312,14 +341,22 @@ describe('the close punisher: landing the hit', () => {
   });
 
   it('charges one swing once however long the boat stands in it', () => {
-    const opened = run(fishAt(), ON_TOP, 1 + FISH_CLOSE_WINDUP_TICKS).fish;
+    const opened = run(
+      fishAt(IN_CLOSE_BAND),
+      ON_TOP,
+      1 + FISH_CLOSE_WINDUP_TICKS,
+    ).fish;
     const { hits } = run(opened, ON_TOP, FISH_CLOSE_ACTIVE_TICKS);
 
     expect(hits).toBe(1);
   });
 
   it('misses entirely when the boat is clear for every active tick', () => {
-    const opened = run(fishAt(), ON_TOP, 1 + FISH_CLOSE_WINDUP_TICKS).fish;
+    const opened = run(
+      fishAt(IN_CLOSE_BAND),
+      ON_TOP,
+      1 + FISH_CLOSE_WINDUP_TICKS,
+    ).fish;
     const { totalDamage } = run(opened, FAR_AWAY, FISH_CLOSE_ACTIVE_TICKS);
 
     expect(totalDamage).toBe(0);
@@ -327,7 +364,7 @@ describe('the close punisher: landing the hit', () => {
 });
 
 describe('the far punisher: committing to a volley', () => {
-  it('winds up as soon as the boat is out of range', () => {
+  it('winds up on the first tick of the far band', () => {
     const { fish } = run(fishAt(), FAR_AWAY, 1);
 
     expect(fish.attackPhase).toBe('windUp');
@@ -335,8 +372,11 @@ describe('the far punisher: committing to a volley', () => {
     expect(fish.attackPhaseTicksRemaining).toBe(FISH_FAR_WINDUP_TICKS);
   });
 
-  it('answers a boat standing flush with the edge of the close hitbox', () => {
-    const { fish } = run(fishAt(), ON_TOP + CLOSE_PUNISHER_REACH, 1);
+  it('needs no range of its own, however close the boat is standing', () => {
+    // The close punisher has the hitbox gating its commit; the volley has
+    // nothing, because it is aimed at wherever the boat is and reaches. A
+    // minimum range here would open a dead ring around the fish.
+    const { fish } = run(fishAt(), ON_TOP, 1);
 
     expect(fish.attackKind).toBe('far');
   });
@@ -344,7 +384,7 @@ describe('the far punisher: committing to a volley', () => {
   it('runs one attack at a time and never both', () => {
     // Two phase machines would allow a fish half way through a lunge and a
     // volley at once. One machine plus one kind is what makes that unspellable,
-    // and the mirrored triggers are what stop it ever being asked for.
+    // and one attack per band is what stops it ever being asked for.
     const { kinds } = run(fishAt(), FAR_AWAY, 600);
 
     expect([...kinds]).toEqual(['far']);

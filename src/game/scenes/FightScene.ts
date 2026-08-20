@@ -224,6 +224,10 @@ export class FightScene extends Phaser.Scene {
       // From the simulation state, not from the interpolated render positions.
       // The readout is there to show what the fight is actually working with.
       lineLength: tether,
+      // Off the state rather than recomputed from the tether above it. The band
+      // has hysteresis, so it depends on the band before it and there is no
+      // second opinion to be had: asking again here could only disagree.
+      band: fish.band,
       resistance: fish.resistance,
       resistanceMax: fish.resistanceMax,
       // The same function the simulation charges the fish with, so the number

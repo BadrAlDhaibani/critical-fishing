@@ -5,6 +5,7 @@ import type { FightInputs, FightState } from '../src/sim/state.ts';
 import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
 import { basicAttackDamage } from '../src/sim/damage.ts';
 import { lineLength } from '../src/sim/distance.ts';
+import { CLOSE_PUNISHER_REACH } from '../src/sim/ai/patterns.ts';
 import {
   ATTACK_COOLDOWN_TICKS,
   ATTACK_LINE_COST,
@@ -16,10 +17,12 @@ import {
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
   FISH_CLOSE_ACTIVE_TICKS,
+  FISH_CLOSE_BAND_DEPTH,
   FISH_CLOSE_COOLDOWN_TICKS,
   FISH_CLOSE_HULL_DAMAGE,
   FISH_CLOSE_RECOVERY_TICKS,
   FISH_CLOSE_WINDUP_TICKS,
+  FISH_DIVE_PER_TICK,
   FISH_FAR_ACTIVE_TICKS,
   FISH_FAR_HULL_DAMAGE,
   FISH_FAR_RISE_PER_TICK,
@@ -27,6 +30,7 @@ import {
   FISH_FAR_WINDUP_TICKS,
   FISH_RESISTANCE_MAX,
   FISH_START_DEPTH,
+  FISH_SWIM_PER_TICK,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_SECOND,
@@ -62,7 +66,16 @@ function hold(state: FightState, inputs: FightInputs, n: number): FightState {
  */
 const NEVER = 100_000;
 
-/** A fight the fish sits out. */
+/**
+ * A fight the fish sits out.
+ *
+ * It sits out the attacking. Since task 1.11 a fish on cooldown is a fish free
+ * to reposition, and it opens the fight at its far-band station, so it holds
+ * still **only while the boat stays in the far band**. Send the boat left, the
+ * way these tests already do: walking towards the fish pulls it into the close
+ * band, at which point it rises and starts closing and the fish under test is no
+ * longer the one the test set up.
+ */
 function quietFish(state: FightState = createFightState()): FightState {
   return {
     ...state,
@@ -831,6 +844,99 @@ describe('stepFight: the fish punishes standing far', () => {
 
     expect(after.fish.attackKind).toBe('close');
     expect(after.projectiles).toHaveLength(1);
+  });
+});
+
+describe('stepFight: the fish repositions', () => {
+  const START = createFightState();
+
+  /** A fight with the boat parked a given distance to the left of the fish. */
+  function boatLeftOfFish(gap: number): FightState {
+    return { ...START, boat: { ...START.boat, x: START.fish.x - gap } };
+  }
+
+  it('opens the fight in the far band, at rest', () => {
+    const after = hold(START, noInputs(), 1);
+
+    expect(after.fish.band).toBe('far');
+    expect(after.fish.x).toBe(START.fish.x);
+    expect(after.fish.depth).toBe(START.fish.depth);
+  });
+
+  it('holds station while the boat keeps away', () => {
+    const after = hold(quietFish(), LEFT, 600);
+
+    expect(after.fish.band).toBe('far');
+    expect(after.fish.x).toBe(START.fish.x);
+    expect(after.fish.depth).toBe(START.fish.depth);
+  });
+
+  // design.md section 3: "the fish is shallow right now" has to read as a window
+  // the player earned. This is the earning of it.
+  it('rises when the boat closes in, and sinks again when it leaves', () => {
+    const rise = Math.ceil(
+      (FISH_START_DEPTH - FISH_CLOSE_BAND_DEPTH) / FISH_DIVE_PER_TICK,
+    );
+    const closed = hold(quietFish(boatLeftOfFish(20)), noInputs(), rise);
+
+    expect(closed.fish.band).toBe('close');
+    expect(closed.fish.depth).toBe(FISH_CLOSE_BAND_DEPTH);
+
+    // Straight back out to the far wall, far enough to clear the outer edge.
+    const left = hold(closed, LEFT, 600);
+
+    expect(left.fish.band).toBe('far');
+    expect(left.fish.depth).toBe(FISH_START_DEPTH);
+  });
+
+  it('closes the gap in the close band and swings once it can reach', () => {
+    // Parked outside the hitbox but inside the band, which is the ordinary case
+    // of being drawn in, and the case the approach exists for. The fish has to
+    // cover the ground itself: standing here and doing nothing is not safe.
+    const gap = 70;
+    const start = boatLeftOfFish(gap);
+
+    expect(hold(start, noInputs(), 1).fish.band).toBe('close');
+
+    const ticks = Math.ceil((gap - CLOSE_PUNISHER_REACH) / FISH_SWIM_PER_TICK);
+    const after = hold(start, noInputs(), ticks + 1);
+
+    expect(after.fish.x).toBeLessThan(START.fish.x);
+    expect(after.fish.attackKind).toBe('close');
+    expect(after.fish.attackPhase).toBe('windUp');
+  });
+
+  it('freezes where it stands for the whole of an attack', () => {
+    // The close punisher's telegraph is drawn on the water above the fish, so a
+    // fish that drifted mid-tell would drag the box after the player.
+    const winding = hold(boatLeftOfFish(20), noInputs(), 1);
+    expect(winding.fish.attackPhase).toBe('windUp');
+
+    const swung = hold(
+      winding,
+      LEFT,
+      FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+    );
+
+    expect(swung.fish.attackPhase).toBe('recovery');
+    expect(swung.fish.x).toBe(winding.fish.x);
+    expect(swung.fish.depth).toBe(winding.fish.depth);
+  });
+
+  it('never moves faster than it is configured to, in either axis', () => {
+    let state = boatLeftOfFish(120);
+
+    for (let tick = 0; tick < 600; tick++) {
+      const next = stepFight(state, tick % 2 === 0 ? LEFT : RIGHT);
+
+      expect(Math.abs(next.fish.x - state.fish.x)).toBeLessThanOrEqual(
+        FISH_SWIM_PER_TICK,
+      );
+      expect(Math.abs(next.fish.depth - state.fish.depth)).toBeLessThanOrEqual(
+        FISH_DIVE_PER_TICK,
+      );
+      state = next;
+    }
   });
 });
 

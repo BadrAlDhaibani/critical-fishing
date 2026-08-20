@@ -31,6 +31,7 @@ import {
   FISH_FAR_WINDUP_TICKS,
 } from '../../data/config.ts';
 import type { FishAttackKind, FishState, ProjectileState } from '../state.ts';
+import { attackForBand } from './bands.ts';
 
 /**
  * How far the boat's centre can be from the fish's and still be caught, in
@@ -62,23 +63,14 @@ export const FAR_SHOT_REACH = FISH_FAR_SHOT_WIDTH / 2 + BOAT_WIDTH / 2;
  * fish commits to one at all. That is deliberate: it means "in range" and
  * "hit" cannot drift apart into two numbers, and the telegraph appearing is
  * always the consequence of standing somewhere the attack reaches.
+ *
+ * The distance bands did not replace this. The band picks *which* attack the
+ * fish would use; this still picks *whether* the close one is worth starting. A
+ * fish in the close band with the boat outside the box commits to nothing and
+ * closes the distance instead, which is what `stepReposition` is for.
  */
 export function closePunisherHits(fishX: number, boatX: number): boolean {
   return Math.abs(boatX - fishX) < CLOSE_PUNISHER_REACH;
-}
-
-/**
- * Whether the fish answers a boat at `boatX` with the far punisher instead.
- *
- * The exact negation of `closePunisherHits`, written out rather than left
- * implied by an `else`, because the mirror is the whole reason there is no
- * attack selection code yet. The two triggers cover the lane between them and
- * overlap nowhere, so the fish always has exactly one answer to where the player
- * is standing and nothing has to choose. Task 1.11 replaces both with distance
- * bands; until then this invents no second range number to be tuned.
- */
-export function farPunisherFires(fishX: number, boatX: number): boolean {
-  return !closePunisherHits(fishX, boatX);
 }
 
 /** How long each phase of one attack lasts, and the gap it leaves behind it. */
@@ -176,7 +168,7 @@ export interface FishAttackResult extends AttackFields {
  * resolved for this tick. Returns a patch that spreads straight into the fish.
  */
 export function stepFishAttack(
-  fish: Pick<FishState, 'x' | 'depth'> & AttackFields,
+  fish: Pick<FishState, 'x' | 'depth' | 'band'> & AttackFields,
   boatX: number,
 ): FishAttackResult {
   if (fish.attackPhase === 'idle') {
@@ -188,14 +180,16 @@ export function stepFishAttack(
       fish.attackCooldownRemaining - 1,
     );
 
-    if (attackCooldownRemaining === 0) {
-      // Where the boat is standing is the whole of the decision. The two
-      // triggers are exact opposites, so the fish is never left with nothing to
-      // answer with and no tie ever has to be broken.
-      const kind: FishAttackKind = farPunisherFires(fish.x, boatX)
-        ? 'far'
-        : 'close';
+    const kind: FishAttackKind = attackForBand(fish.band);
 
+    // The band chose the attack; the close punisher still gets a say in whether
+    // it is worth starting. Its hitbox is a good deal narrower than the band
+    // around it, so a fish that has just been drawn into the close band usually
+    // cannot reach yet, and it swims rather than swinging at nothing. The volley
+    // has no such test: it is aimed at wherever the boat is and reaches.
+    const canCommit = kind === 'far' || closePunisherHits(fish.x, boatX);
+
+    if (attackCooldownRemaining === 0 && canCommit) {
       return {
         attackPhase: 'windUp',
         attackKind: kind,
@@ -211,6 +205,9 @@ export function stepFishAttack(
       attackPhase: 'idle',
       attackKind: null,
       attackPhaseTicksRemaining: 0,
+      // Held at zero once it has run out rather than reloaded, so a fish waiting
+      // for its approach to bring the boat into the box commits on the very tick
+      // it arrives instead of paying a second cooldown for having been patient.
       attackCooldownRemaining,
       attackHasHit: false,
       hullDamage: 0,

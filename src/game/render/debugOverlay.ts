@@ -48,6 +48,16 @@ export interface DebugFields {
    * out of it, so it needs to be readable while moving.
    */
   lineLength: number;
+  /**
+   * Which distance band that length falls in.
+   *
+   * The only thing driving the fish that has no picture on screen at all: the
+   * band decides which attack is coming and which way the fish is about to
+   * move, and from the boat it is invisible until the telegraph is already up.
+   * It is also the one number with hysteresis, so watching where it flips and
+   * where it flips back is the whole of tuning the edges.
+   */
+  band: string;
   /** The fish's resistance, current and full. */
   resistance: number;
   resistanceMax: number;
@@ -107,7 +117,7 @@ export class DebugOverlay {
       `ticks  ${fields.totalTicks}`,
       `hull   ${fields.hull}/${fields.hullMax}`,
       `stam   ${Math.floor(fields.stamina)}/${fields.staminaMax}`,
-      `tether ${fields.lineLength.toFixed(1)} u`,
+      `tether ${fields.lineLength.toFixed(1)} u  (${fields.band})`,
       `resist ${fields.resistance}/${fields.resistanceMax}`,
       `dmg    ${fields.attackDamage}`,
       `fish   ${attackLabel(fields)} ${fields.fishPhaseTicks}`,

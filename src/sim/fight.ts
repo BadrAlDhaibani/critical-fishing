@@ -24,9 +24,10 @@ import {
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_TICK,
 } from '../data/config.ts';
+import { stepReposition } from './ai/bands.ts';
 import { stepFishAttack, stepProjectiles } from './ai/patterns.ts';
 import { basicAttackDamage } from './damage.ts';
-import { lineLength } from './distance.ts';
+import { bandFor, lineLength } from './distance.ts';
 import type { FightInputs, FightState } from './state.ts';
 
 /**
@@ -101,6 +102,13 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     );
   }
 
+  // Read against the fish's position at the top of the tick, because the
+  // repositioning on the next line is what moves it and it needs the band first.
+  // The fish covers well under a unit a tick, so the band and the length the
+  // player's damage is priced against can differ by a fraction at most.
+  const band = bandFor(lineLength({ x }, state.fish), state.fish.band);
+  const { x: fishX, depth } = stepReposition({ ...state.fish, band }, x);
+
   // Counted down before the press is looked at, so a cooldown of exactly one
   // tick is over by the time the next input arrives rather than swallowing it.
   let attackCooldownRemaining = Math.max(
@@ -128,10 +136,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     line -= ATTACK_LINE_COST;
     attackCooldownRemaining = ATTACK_COOLDOWN_TICKS;
 
-    // Measured from the x this tick just resolved, not the one the tick opened
-    // on, so a hit landed while moving is priced at the position the boat
-    // actually ends up in and the debug readout agrees with what was dealt.
-    const damage = basicAttackDamage(lineLength({ x }, state.fish));
+    // Measured from the positions this tick just resolved, on both sides, not
+    // the ones the tick opened on, so a hit landed while moving is priced at
+    // where the boat actually ends up and the debug readout agrees with what was
+    // dealt. The fish having just risen or dived counts for the same reason.
+    const damage = basicAttackDamage(lineLength({ x }, { x: fishX, depth }));
     resistance = Math.max(0, resistance - damage);
   }
 
@@ -161,8 +170,12 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // fired. A shot spawned this tick appears at the fish and neither moves nor
   // resolves until the next one, so no shot can be fired and land in the same
   // tick however shallow the fish gets once the AI owns depth at task 1.11.
+  //
+  // The fish is handed the band and the position it has just repositioned to, so
+  // an attack committed this tick winds up from where the fish now is rather
+  // than from where it was before it moved.
   const shots = stepProjectiles(state.projectiles, x);
-  const attack = stepFishAttack(state.fish, x);
+  const attack = stepFishAttack({ ...state.fish, band, x: fishX, depth }, x);
   const projectiles = [...shots.projectiles, ...attack.spawned];
 
   // Both can land in the same tick. That is the volley outliving the attack that
@@ -194,8 +207,9 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       regenDelayRemaining,
     },
     fish: {
-      x: state.fish.x,
-      depth: state.fish.depth,
+      x: fishX,
+      depth,
+      band,
       resistance,
       resistanceMax: state.fish.resistanceMax,
       attackPhase: attack.attackPhase,

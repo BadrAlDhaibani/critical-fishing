@@ -117,11 +117,24 @@ export type FishAttackPhase = 'idle' | 'windUp' | 'active' | 'recovery';
  * that punishes standing far. The fish runs one at a time through the single
  * phase machine above, so this says which, and is null exactly while idle.
  *
- * Not a selection system. Until task 1.11 gives the fish distance bands, which
- * one starts is decided by where the boat is standing, and the two triggers are
- * exact opposites of each other so no chooser exists yet.
+ * Which one starts is `band`'s decision, below.
  */
 export type FishAttackKind = 'close' | 'far';
+
+/**
+ * Which distance band the fight is in.
+ *
+ * Two of them for the grey box fish, which is design.md section 3's "common"
+ * rarity: two bands, one attack each. Rarer fish get a third band and
+ * overlapping attack lists, and none of that changes this type.
+ *
+ * The same two words as `FishAttackKind` above, and deliberately a separate
+ * type. They line up one to one only because this fish has one attack per band;
+ * as soon as a band holds two attacks, or an attack appears in both bands, the
+ * two stop being the same question. `attackForBand` in sim/ai/bands.ts is the
+ * one place that maps between them.
+ */
+export type BandId = 'close' | 'far';
 
 /**
  * One shot from the far punisher's volley, in flight.
@@ -163,10 +176,22 @@ export interface FishState {
    * screen y: the surface is depth 0 and the boat sits on it, so the simulation
    * never has to know where the waterline was drawn.
    *
-   * design.md section 2: both axes are AI-driven, never random. Static until
-   * task 1.11.
+   * design.md section 2: both axes are AI-driven, never random. `sim/ai/bands.ts`
+   * drives both, and only while the fish is idle.
    */
   depth: number;
+  /**
+   * Which distance band the fish thinks the fight is in.
+   *
+   * State rather than a derived number, and the only thing about the fight's
+   * geometry that is. `bandFor` in sim/distance.ts holds the current band inside
+   * the hysteresis margin, so the answer depends on the previous answer and
+   * there is nothing to recompute it from. Everything else about the distance is
+   * one hypot away and is never stored.
+   *
+   * It is what the fish selects an attack with, and what it repositions towards.
+   */
+  band: BandId;
   /** The fish's health. Reaches zero and it is landed. design.md section 2. */
   resistance: number;
   /**
@@ -179,9 +204,9 @@ export interface FishState {
    * Which part of the current attack is running, or `idle` between attempts.
    *
    * Hard-coded to two attacks for now. Task 3.1 is what turns this into a
-   * selection from a fish definition's pattern list, and task 1.11 is what gives
-   * the fish bands to select by; until then where the boat stands decides which
-   * of the two it commits to, and a cooldown decides when.
+   * selection from a fish definition's pattern list; until then `band` picks
+   * which of the two, the close punisher's hitbox decides whether it is worth
+   * starting at all, and a cooldown decides when.
    */
   attackPhase: FishAttackPhase;
   /**
@@ -296,10 +321,18 @@ export function createFightState(): FightState {
       depth: FISH_START_DEPTH,
       resistance: FISH_RESISTANCE_MAX,
       resistanceMax: FISH_RESISTANCE_MAX,
+      // Seeded rather than computed, and it has to be. The opening line is 141
+      // units, which sits inside the hysteresis margin, so `bandFor` has no
+      // answer of its own to give there: the band inside the margin is whatever
+      // the band already was, and at tick zero there is no already.
+      //
+      // Far is the honest seed as well as the convenient one. The fish opens the
+      // fight at its far-band resting depth and 100 units clear of the boat, so
+      // tick one is a volley winding up and the player has the whole flight to
+      // answer it.
+      band: 'far',
       // Ready rather than on cooldown, so the fish answers the moment the
-      // player closes on it. It opens the fight 100 units clear of the boat,
-      // which is outside the close punisher's hitbox, so tick one is a far
-      // punisher winding up and the player has the whole flight to answer it.
+      // player closes on it.
       attackPhase: 'idle',
       attackKind: null,
       attackPhaseTicksRemaining: 0,

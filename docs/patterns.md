@@ -43,7 +43,7 @@ hitbox this tick has carried it out. A function taking `FightState` could only
 see where the boat started.
 
 Used in: `sim/distance.ts` (`lineLength`), `sim/ai/patterns.ts`
-(`stepFishAttack`, `stepProjectiles`)
+(`stepFishAttack`, `stepProjectiles`), `sim/ai/bands.ts` (`stepReposition`)
 
 ---
 

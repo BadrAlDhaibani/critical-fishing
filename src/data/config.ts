@@ -311,6 +311,82 @@ export const FISH_FAR_SHOT_WIDTH = 10;
 export const FISH_FAR_SHOT_HEIGHT = 10;
 
 /**
+ * The distance bands. Chosen 2026-08-20, see decisions.md.
+ *
+ * design.md section 3: the fish reads the current distance, picks from that
+ * band's attacks, and repositions if it wants a different band. Two bands, one
+ * attack each, which is the "common" rarity in that section. The close band gets
+ * the close punisher and the far band the volley.
+ *
+ * Measured on line length, which is euclidean and includes depth, not on
+ * horizontal distance. That is what lets the fish's own depth move it between
+ * bands, so rising and diving mean something beyond damage and telegraph length.
+ *
+ * The hysteresis is design.md section 3's second fairness rule: inside the
+ * margin the fish keeps whichever band it already had, so a player standing on
+ * the boundary cannot make it flicker between two movesets.
+ *
+ * In units the fight is actually played in: against a fish resting at
+ * FISH_FAR_BAND_DEPTH, the close band starts about 75 horizontal away, and
+ * against one risen to FISH_CLOSE_BAND_DEPTH it does not end until about 147.
+ * That asymmetry is not a mistake. Rising shortens the line by itself, so a fish
+ * that has committed to being close is harder to shake off than it was to draw
+ * in, which is what makes closing a decision rather than a toggle.
+ */
+export const FISH_BAND_EDGE = 140;
+export const FISH_BAND_HYSTERESIS = 15;
+
+/**
+ * Where the fish wants to sit in each band. It rises to punish a boat that has
+ * closed and sinks back once one has backed off.
+ *
+ * The intent design.md section 3 asks for, and the only depth script the grey
+ * box fish has: "the fish is shallow right now" reads as an earned window
+ * because closing in is what earned it.
+ *
+ * Both are levers the fish already had, now pointed at something. Depth is a leg
+ * of line length, so rising to 50 hands the player full damage for as long as
+ * they are willing to stand in the hitbox, and it is the divisor in
+ * `shotFlightTicks`, so a shallow fish's volley gives half the warning a resting
+ * one's does. Neither needed a new number.
+ *
+ * FISH_FAR_BAND_DEPTH is the depth the fish already starts a fight at, so the
+ * opening position is its resting station rather than somewhere it immediately
+ * drifts away from.
+ *
+ * It must stay at or under FISH_BAND_EDGE - FISH_BAND_HYSTERESIS, and a test
+ * pins that. A boat directly above the fish is exactly `depth` away, so a fish
+ * resting deeper than the edge could never be pulled into the close band at all:
+ * it would dive out of reach for the whole fight and the close punisher would
+ * never fire. That is design.md section 3's no-safe-camping-spot rule broken
+ * from the fish's side of it.
+ */
+export const FISH_CLOSE_BAND_DEPTH = 50;
+export const FISH_FAR_BAND_DEPTH = 100;
+
+/**
+ * How fast the fish repositions, horizontally and vertically.
+ *
+ * Authored per second with the per-tick values derived from TICK_HZ, same as the
+ * boat's speed, the stamina refill and the shots' climb.
+ *
+ * 36 a second is 40% of the 90 the boat walks at, and a test pins that
+ * inequality rather than the value. Walking always breaks contact, so a fish
+ * gliding towards you is pressure rather than a trap, and the dash is still
+ * insurance rather than the only way out. It closes about 36 units over a
+ * close-punisher cooldown, which is most of the way from the edge of the hitbox
+ * to underneath you.
+ *
+ * 30 a second of rise and dive takes the fish between its two resting depths in
+ * about 1.7 seconds, a little under one attack cycle, so it arrives at the depth
+ * its band wants at roughly the moment it is ready to attack from there.
+ */
+export const FISH_SWIM_PER_SECOND = 36;
+export const FISH_SWIM_PER_TICK = FISH_SWIM_PER_SECOND / TICK_HZ;
+export const FISH_DIVE_PER_SECOND = 30;
+export const FISH_DIVE_PER_TICK = FISH_DIVE_PER_SECOND / TICK_HZ;
+
+/**
  * How far outside the fish its far-punisher tell is drawn.
  *
  * The close punisher owns a column of water and is telegraphed on it. The far
@@ -346,16 +422,21 @@ export const FISH_WIDTH = 20;
 export const FISH_HEIGHT = 12;
 
 /**
- * Where the fish sits. Static for task 1.4; the AI takes both over at 1.11.
+ * Where the fish opens a fight. The AI owns both from task 1.11 onwards.
  *
  * Depth counts down from the waterline, so 100 draws at y 170 and the boat is
  * implicitly at depth 0. Chosen 2026-08-19, see decisions.md: 100 units right of
  * the boat's start opens the fight on a diagonal line rather than a vertical
- * one, and mid-water leaves room either side for the fish to rise and dive once
- * it can.
+ * one, and mid-water leaves room either side for the fish to rise and dive.
+ *
+ * The depth is FISH_FAR_BAND_DEPTH rather than a number of its own, because it
+ * is the same fact twice: the fish opens the fight at its resting station in the
+ * band it opens in, so nothing drifts on tick one. The opening line is 141
+ * units, which sits inside the hysteresis margin, so the opening band is seeded
+ * in `createFightState` rather than worked out from the geometry.
  */
 export const FISH_START_X = 340;
-export const FISH_START_DEPTH = 100;
+export const FISH_START_DEPTH = FISH_FAR_BAND_DEPTH;
 
 /**
  * The default loadout. Chosen 2026-08-19, see decisions.md.
