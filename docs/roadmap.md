@@ -13,33 +13,33 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 1, grey box fight
-- **Last completed task:** 1.8, stamina regeneration. 1.7 before it closed both
-  gates and was not retuned. 1.8's tests pass and it was written up at Badr's
-  request; if he has not said it feels right, the half-second pause is the
-  thing to ask about first. See the two 2026-08-19 decisions.md entries.
+- **Last completed task:** 1.9, the fish's close punisher. Tests pass, lint and
+  build are clean, and Badr signed it off on 2026-08-19. Not retuned. If it
+  turns out to read wrong later, the 45-tick wind-up is the number to revisit
+  first: everything else in 1.9 was sized around it, and the close punisher has
+  only ever been judged on its own, without the far punisher pulling the player
+  in the opposite direction.
 - **In a half state:** nothing.
-- **Next task:** 1.9, the fish's close punisher. This is the first task where
-  the fish does anything, so it is a bigger surface than anything since 1.3.
+- **Next task:** 1.10, the far punisher, a slow tracking volley.
   1.2c is still open and still not gameplay-blocking.
-- **What 1.9 has to ask for and must not invent.** design.md section 8 lists all
-  of these, and section 3 governs the shape:
-  - Wind-up, active and recovery durations in ticks. The wind-up is the
-    telegraph and **cannot be cancelled once started**: design.md section 3
-    calls that non-negotiable, and the dash was built to mirror it.
-  - Hull damage, priced against the 100 hull the default boat has.
-  - The hitbox: how much of the space above the fish the attack covers, in
-    internal-resolution units, and how the telegraph reads as a grey box.
-  - **Invulnerability frames on the dash.** Left open at 1.6 on purpose so that
-    1.9 decides it with something on screen to be invulnerable to. It is a real
-    decision, not a detail: without them the dash is a positional tool only.
-  - How the fish decides to attack at all, given that it is static and has no
-    bands until 1.11. A cooldown between attempts is the cheapest stand-in, and
-    its length is another number to ask for rather than pick.
-- **Where 1.9's code goes.** `sim/ai/patterns.ts` per architecture.md section 2,
-  and it stays a hard-coded pattern for one grey box fish. Task 3.1 is what
-  extracts fish into data files, so writing the definition format now is
-  building ahead of the roadmap. Do read architecture.md section 4 first
-  anyway, so the hard-coded shape does not make that extraction painful.
+- **What 1.10 has to ask for and must not invent.** Its own wind-up, active and
+  recovery durations, its own hull damage, its own hitbox or projectile speed,
+  and its own cooldown. None of the 1.9 numbers transfer: design.md section 3
+  wants it "trivially sidestepped up close, hard to read from across the
+  screen", which is a different shape from the close punisher entirely.
+- **The selection problem 1.10 walks into.** With two attacks and no bands until
+  1.11, something has to choose between them. Do not build band selection early
+  to solve it. The cheap shape that does not: give the far punisher its own
+  trigger predicate that fires when the boat is **outside** close range, exactly
+  mirroring `closePunisherHits`. The two are then mutually exclusive by
+  construction and no chooser exists yet to be thrown away at 1.11. Raise this
+  with Badr rather than assuming it.
+- **Where the fish's code lives.** `sim/ai/patterns.ts`, per architecture.md
+  section 2. Still hard-coded patterns for one grey box fish: task 3.1 extracts
+  fish into data files, and writing that definition format now is building ahead
+  of the roadmap. The field names in there already match the architecture.md
+  section 4 sketch so the extraction is a move rather than a rewrite. Nothing has
+  an `id`, a `weight` or a `punishes` yet, deliberately.
 - **Numbers settled so far.** All of these answer parts of design.md section 8
   and must not be re-invented or quietly retuned outside task 1.13:
   - Default boat hull 100, default line stamina pool 80, grey box fish
@@ -51,12 +51,56 @@ Update this block at the end of every batch. Keep it to a few lines.
     floor of 6, on a true inverse curve. Ten attacks from a full pool.
   - Stamina refill: 6 a second, paused for 30 ticks by any spend. Empty to full
     is 13.3 seconds of not spending.
-- **Carried out of 1.8, needed before 1.9:**
+  - Close punisher: 45 wind-up, 8 active, 45 recovery, 60 cooldown. 25 hull
+    damage, so four of them end the fight. 60-unit hitbox centred on the fish.
+    Full cycle 158 ticks, 2.6 seconds.
+  - **The dash grants no invulnerability frames.** Decided at 1.9 and pinned by
+    a test. It buys 55 units of distance and nothing else.
+- **Carried out of 1.9, needed before 1.10:**
+  - **The fish only commits when the boat is already in range, and the range is
+    the hitbox itself.** One predicate, `closePunisherHits`, answers both "does
+    this connect" and "is it worth starting". That is deliberate and is what
+    stops the trigger drifting into a second tuned number. It is also why the
+    telegraph appearing is always the player's own doing.
+  - `CLOSE_PUNISHER_REACH` is **derived**, half the hitbox plus half the hull,
+    because the box catches an overlapping boat rather than only a boat whose
+    centre is inside it. Do not turn it into a third tunable.
+  - The wind-up branch of `stepClosePunisher` **does not read the boat at all**,
+    and must not start. That is design.md section 3's commitment rule expressed
+    as code rather than as a comment, and two tests assert it.
+  - The hitbox is re-tested on **every** active tick, with `attackHasHit`
+    keeping it to one hit per swing. A boat that dashes into a box drawn solid
+    on screen has to be hit by it, or the drawing is a lie.
+  - `stepClosePunisher` takes a `Pick<>` of what it reads and returns a patch
+    that spreads into the fish, so `stepFight` can hand it the x it has already
+    resolved this tick. Same convention as `lineLength`. **Two uses now**; a
+    third promotes it to patterns.md.
+  - **Tests that walk the boat rightwards now walk it into the hitbox.** The
+    boat starts at 240 and the fish sits at 340, so anything holding `RIGHT`
+    for more than about 39 ticks is inside the box and taking hull damage. Two
+    purity tests moved to `LEFT` for this reason, one of which had been passing
+    only by coincidence. If a test needs the boat far from the fish for a long
+    run, send it left.
+  - The old "leaves the hull alone entirely, since nothing damages it yet" test
+    is gone, replaced by one that holds the boat away from the fish. The hull is
+    no longer untouchable, only untouched by anything the boat does itself.
+  - The telegraph is `game/render/telegraph.ts`, a Phaser rectangle told a phase
+    and a position. Outline while winding up, solid while active, hidden
+    otherwise. **Recovery deliberately draws nothing**: reading the recovery and
+    choosing to close is the punish, and marking it would do that for the
+    player. The debug readout names the phase instead, which is a tuning tool
+    and goes away with the rest of the readout.
+  - The readout's `fish` line shows the cooldown while idle and the phase's own
+    counter otherwise, because the phase counter is zero while idle and would
+    say nothing.
+- **Carried out of 1.8, still true:**
   - **The attack cooldown is 20 ticks and the refill pause is 30, so attacking
     at full cadence means the pool never refills at all.** That is the whole
-    point of the pause and it is what 1.9's attack windows are supposed to
-    exploit: the player has to disengage to recover. If either number moves,
-    check that inequality still holds before anything else.
+    point of the pause, and 1.9 is what now exploits it: the close punisher's
+    recovery and cooldown give 105 ticks of safety, about five attacks and 40
+    stamina, during which the refill never runs. The player has to disengage to
+    recover. If any of those numbers move, check the inequality still holds
+    before anything else.
   - The pool is **fractional** now, since the rate is per tick. Nothing rounds
     it, because costs are checked against the real number; the readout floors
     it so it can never claim an attack is affordable a tick before the
@@ -85,8 +129,6 @@ Update this block at the end of every batch. Keep it to a few lines.
     the dash and the attack, and a dash eaten by a wall is still charged. All
     deliberate, all tested.
   - Attacking during a dash is allowed. The shared pool is the only limiter.
-  - **No invulnerability frames on the dash**, deliberately, and 1.9 is the task
-    that decides whether it gets them. See the ask list above.
   - The debug readout shows `hull`, `stam` and `resist` as `current/max`, `dmg`
     as what the next attack would deal from where the boat is standing, and
     `tether` for the line's length, which is a different thing from `stam`. If
@@ -114,6 +156,11 @@ Update this block at the end of every batch. Keep it to a few lines.
   - Fish depth is units below the waterline, not a screen y. `sim/` never sees
     `WATER_LINE_Y`; `FightScene` owns the one conversion. The boat is depth 0.
 - **Noticed but not acted on:**
+  - `stepFight` now names fifteen fields in its return literal and reads as four
+    stacked concerns: movement, the player's attack, the pool, and the fish. It
+    is still followable, but 1.10 adds a fifth and 1.11 adds a sixth. Splitting
+    the boat and fish halves into two functions that `stepFight` composes is the
+    obvious move and is a task of its own, not something to slip into 1.10.
   - Fullscreen zoom reads `3x` where `4x` is expected. Task 1.2c. **The console
     readings still have not been taken**, so the diagnosis has not started.
     Cheapest to grab during any future playtest: `devicePixelRatio`,
@@ -178,7 +225,7 @@ true`, nearest-neighbour filtering, integer-zoom scale mode, letterboxed
       _Context: design.md section 2, architecture.md section 4._
 - [x] **1.8 Stamina regeneration.** Line pool refills over time.
       _Context: design.md section 2._
-- [ ] **1.9 Fish attack: close punisher.** Wind-up, active, recovery. Commits
+- [x] **1.9 Fish attack: close punisher.** Wind-up, active, recovery. Commits
       once started. Damages hull.
       _Context: design.md section 3._
 - [ ] **1.10 Fish attack: far punisher.** Slow tracking volley.

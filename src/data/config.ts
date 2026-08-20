@@ -156,6 +156,77 @@ export const ATTACK_DAMAGE_MAX = 20;
 export const ATTACK_DAMAGE_MIN = 6;
 export const ATTACK_FULL_DAMAGE_RANGE = 100;
 
+/**
+ * The fish's close punisher. Chosen 2026-08-19, see decisions.md.
+ *
+ * design.md section 3 requires every fish to have an attack that punishes being
+ * close, because otherwise the best damage position is also the safest one and
+ * the movement axis stops mattering. This is that attack, and until task 1.11
+ * gives the fish distance bands it is the only thing it does.
+ *
+ * Durations are authored in ticks rather than per second and derived, unlike the
+ * boat's speed and the refill rate. Telegraphs are reasoned about in frames: the
+ * question being answered is "how many frames does the player have to read this
+ * and move", and converting that through a rate would only obscure it.
+ *
+ * The wind-up is the telegraph and cannot be cancelled once it starts, which
+ * design.md section 3 calls non-negotiable. The recovery is the player's reward
+ * for reading it: 45 ticks is two attacks at the 20-tick cadence, or one attack
+ * and a reposition.
+ */
+export const FISH_CLOSE_WINDUP_TICKS = 45;
+export const FISH_CLOSE_ACTIVE_TICKS = 8;
+export const FISH_CLOSE_RECOVERY_TICKS = 45;
+
+/**
+ * The gap between the end of one attack and the earliest start of the next.
+ *
+ * A stand-in for attack selection, which arrives with the distance bands at task
+ * 1.11. A static fish with no bands still needs some rule for when to commit,
+ * and a cooldown is the cheapest one that does not invent band edges early.
+ *
+ * Recovery plus cooldown is 105 ticks of safety after the hitbox clears, about
+ * five attacks at the 20-tick cadence and 40 stamina, during which the refill
+ * never runs because the 30-tick pause is restarted by every one of them. That
+ * is the exchange the fight is built on: the safe window is also the window in
+ * which the pool is being emptied. Full cycle is 158 ticks, about 2.6 seconds.
+ */
+export const FISH_CLOSE_COOLDOWN_TICKS = 60;
+
+/**
+ * What one landed close punisher takes off the hull.
+ *
+ * Priced against the default boat's 100, so four of them end a fight. A single
+ * hit is a real setback rather than a scratch, which is the Souls flavour
+ * design.md section 1 asks for, but one misread is survivable.
+ */
+export const FISH_CLOSE_HULL_DAMAGE = 25;
+
+/**
+ * How much of the lane above the fish the attack covers, centred on the fish.
+ *
+ * The hull is 24 wide, so the boat is clear of a 60-wide box at 42 units from
+ * the fish's centre. One dash covers 55 and escapes with room; walking covers it
+ * in 28 ticks, which fits inside the 45-tick wind-up only if the tell is read
+ * immediately. The dash is therefore insurance rather than the only answer,
+ * which is what keeps it a decision.
+ *
+ * Width is the only number here. The attack is tested horizontally against a
+ * boat that is always on the surface, so the box has no meaningful height: what
+ * it is drawn as covering vertically is the renderer's business.
+ */
+export const FISH_CLOSE_HITBOX_WIDTH = 60;
+
+/**
+ * The telegraph. Outlined during the wind-up, filled solid while the hitbox is
+ * live, absent otherwise.
+ *
+ * Kept clear of COLOUR_BAR_RESISTANCE above, which is also red: one of them is
+ * information about the fish's health and the other is about to take a quarter
+ * of the hull off, and they must not be confused at a glance.
+ */
+export const COLOUR_TELEGRAPH = 0xe07a3c;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;

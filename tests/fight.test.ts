@@ -15,6 +15,11 @@ import {
   DASH_LINE_COST,
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
+  FISH_CLOSE_ACTIVE_TICKS,
+  FISH_CLOSE_COOLDOWN_TICKS,
+  FISH_CLOSE_HULL_DAMAGE,
+  FISH_CLOSE_RECOVERY_TICKS,
+  FISH_CLOSE_WINDUP_TICKS,
   FISH_RESISTANCE_MAX,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
@@ -622,11 +627,94 @@ describe('stepFight: the pool refills', () => {
     expect(state.boat.line).toBeLessThan(DEFAULT_LINE_MAX / 2);
   });
 
-  it('leaves the hull alone entirely, since nothing damages it yet', () => {
+  // Task 1.9 retired the old version of this, which asserted the hull was never
+  // touched at all. The fish is what touches it now, and only from close range.
+  it('leaves the hull alone while the boat keeps its distance', () => {
     const start = createFightState();
-    const after = hold(start, DASH_RIGHT, 600);
+    const after = hold(start, LEFT, 600);
 
     expect(after.boat.hull).toBe(start.boat.hull);
+  });
+});
+
+describe('stepFight: the fish punishes standing close', () => {
+  /** Long enough for the fish to wind up and swing once. */
+  const ONE_SWING = 1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS;
+
+  /** A fight with the boat parked directly above the fish. */
+  function overhead(overrides: Partial<FightState['boat']> = {}): FightState {
+    const start = createFightState();
+    return {
+      ...start,
+      boat: { ...start.boat, x: start.fish.x, ...overrides },
+    };
+  }
+
+  it('takes the hull damage the close punisher is worth', () => {
+    const after = hold(overhead(), noInputs(), ONE_SWING);
+
+    expect(after.boat.hull).toBe(DEFAULT_HULL_MAX - FISH_CLOSE_HULL_DAMAGE);
+  });
+
+  it('ends the boat in four swings', () => {
+    // The whole point of pricing the damage against the hull. Four cycles plus
+    // the tick that leaves idle, and there is nothing left.
+    const cycle =
+      FISH_CLOSE_WINDUP_TICKS +
+      FISH_CLOSE_ACTIVE_TICKS +
+      FISH_CLOSE_RECOVERY_TICKS +
+      FISH_CLOSE_COOLDOWN_TICKS;
+    const after = hold(overhead(), noInputs(), 1 + 4 * cycle);
+
+    expect(after.boat.hull).toBe(0);
+  });
+
+  // The lose state is task 1.12. Until then the hull sits at zero rather than
+  // going negative and dragging its bar backwards, the same as resistance does.
+  it('clamps the hull at zero rather than going negative', () => {
+    const after = hold(overhead({ hull: 1 }), noInputs(), ONE_SWING);
+
+    expect(after.boat.hull).toBe(0);
+  });
+
+  // The 1.9 decision, pinned so it cannot drift back into a Souls roll by
+  // accident. The dash is 55 units of distance, and distance is the only thing
+  // it buys: a dash that stays inside the box is a dash that gets hit.
+  it('grants no invulnerability frames to a dash inside the hitbox', () => {
+    // Winding up already, so the active frames land during the dash rather than
+    // after it. The dash is towards the fish, so the boat cannot leave the box.
+    const winding = hold(overhead(), noInputs(), FISH_CLOSE_WINDUP_TICKS);
+    expect(winding.fish.attackPhase).toBe('windUp');
+
+    const dashed = hold(winding, DASH_LEFT, DASH_DURATION_TICKS - 1);
+
+    // Still mid-dash when the hull was charged, which is the whole point.
+    expect(dashed.boat.dashTicksRemaining).toBeGreaterThan(0);
+    expect(dashed.boat.hull).toBe(DEFAULT_HULL_MAX - FISH_CLOSE_HULL_DAMAGE);
+  });
+
+  it('lets a boat that dashes clear of the box off entirely', () => {
+    // The same attack, answered by moving instead of by phasing. One dash
+    // covers more ground than the box reaches, which is what makes reading the
+    // tell worth anything.
+    const winding = hold(overhead(), noInputs(), 1);
+    expect(winding.fish.attackPhase).toBe('windUp');
+
+    const after = hold(
+      winding,
+      DASH_LEFT,
+      FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+    );
+
+    expect(after.fish.attackPhase).toBe('recovery');
+    expect(after.boat.hull).toBe(DEFAULT_HULL_MAX);
+  });
+
+  it('never attacks a boat that stays across the lane', () => {
+    const after = hold(createFightState(), LEFT, 600);
+
+    expect(after.fish.attackPhase).toBe('idle');
+    expect(after.boat.hull).toBe(DEFAULT_HULL_MAX);
   });
 });
 
@@ -647,9 +735,13 @@ describe('stepFight: purity', () => {
 
   // stepFight builds a fresh state object every tick, so any field it forgets
   // to carry forward silently disappears one tick into the fight.
-  it('carries the fish forward unchanged', () => {
+  //
+  // Away from the fish rather than towards it, deliberately. The fish is
+  // entitled to change once the boat is inside its reach, so driving right here
+  // would be asserting that it does nothing while walking into its hitbox.
+  it('carries the fish forward unchanged while the boat keeps away', () => {
     const start = createFightState();
-    const after = hold(start, RIGHT, 300);
+    const after = hold(start, LEFT, 300);
 
     expect(after.fish).toEqual(start.fish);
   });
@@ -666,14 +758,24 @@ describe('stepFight: purity', () => {
     expect(after.fish.x).toBe(start.fish.x);
     expect(after.fish.depth).toBe(start.fish.depth);
     expect(after.fish.resistanceMax).toBe(start.fish.resistanceMax);
+    expect(after.fish.attackPhase).toBe(start.fish.attackPhase);
+    expect(after.fish.attackPhaseTicksRemaining).toBe(
+      start.fish.attackPhaseTicksRemaining,
+    );
+    expect(after.fish.attackCooldownRemaining).toBe(
+      start.fish.attackCooldownRemaining,
+    );
+    expect(after.fish.attackHasHit).toBe(start.fish.attackHasHit);
     expect(start.fish.resistance).toBe(FISH_RESISTANCE_MAX);
   });
 
   // The boat object is rebuilt every tick around the one field that changes,
   // so it falls into the same trap the fish test above guards against.
+  // Away from the fish, for the same reason as the fish test above: the hull is
+  // no longer untouchable, it is untouched by anything the boat does itself.
   it('carries the boat resources forward unchanged', () => {
     const start = createFightState();
-    const after = hold(start, RIGHT, 300);
+    const after = hold(start, LEFT, 300);
 
     expect(after.boat.hull).toBe(start.boat.hull);
     expect(after.boat.hullMax).toBe(start.boat.hullMax);

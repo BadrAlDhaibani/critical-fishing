@@ -100,6 +100,16 @@ export interface BoatState {
   regenDelayRemaining: number;
 }
 
+/**
+ * Where the fish is in its attack cycle.
+ *
+ * `windUp` is the telegraph and is the only one of these the player is expected
+ * to read. design.md section 3 forbids cancelling it, so there is no transition
+ * out of it except into `active`: a phase the fish can back out of would make
+ * every read worthless.
+ */
+export type FishAttackPhase = 'idle' | 'windUp' | 'active' | 'recovery';
+
 export interface FishState {
   /** Horizontal position in internal-resolution units, at the fish's centre. */
   x: number;
@@ -120,6 +130,36 @@ export interface FishState {
    * count, so it is a per-fish and per-room number rather than a constant.
    */
   resistanceMax: number;
+  /**
+   * Which part of the close punisher is running, or `idle` between attempts.
+   *
+   * Hard-coded to one attack for now. Task 3.1 is what turns this into a
+   * selection from a fish definition's pattern list, and task 1.11 is what gives
+   * the fish bands to select by; until then a cooldown decides when it commits.
+   */
+  attackPhase: FishAttackPhase;
+  /**
+   * Ticks left in whichever phase is currently running. Zero while `idle`.
+   *
+   * One counter shared by all three phases rather than one each, because exactly
+   * one of them is ever running and three counters would allow states that mean
+   * nothing, like being half way through a wind-up and a recovery at once.
+   */
+  attackPhaseTicksRemaining: number;
+  /**
+   * Ticks until the fish may commit to another attack, counted down while
+   * `idle`. Reloaded in full when a recovery ends.
+   */
+  attackCooldownRemaining: number;
+  /**
+   * Whether this swing has already connected.
+   *
+   * The hitbox is live for several ticks and is tested on every one of them, so
+   * a boat that dashes into it after it opens is still hit. This is what stops
+   * that costing the hull once per tick: one swing is one hit, however long the
+   * player stands in it. Cleared when a wind-up ends and the next swing opens.
+   */
+  attackHasHit: boolean;
 }
 
 export interface FightState {
@@ -183,6 +223,13 @@ export function createFightState(): FightState {
       depth: FISH_START_DEPTH,
       resistance: FISH_RESISTANCE_MAX,
       resistanceMax: FISH_RESISTANCE_MAX,
+      // Ready rather than on cooldown, so the fish answers the moment the
+      // player closes on it. It opens the fight 100 units clear of the boat,
+      // which is outside the hitbox, so this costs nothing on tick one.
+      attackPhase: 'idle',
+      attackPhaseTicksRemaining: 0,
+      attackCooldownRemaining: 0,
+      attackHasHit: false,
     },
   };
 }

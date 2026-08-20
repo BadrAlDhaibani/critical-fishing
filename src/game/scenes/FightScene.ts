@@ -33,6 +33,7 @@ import {
 } from '../input/keyboard.ts';
 import { DebugOverlay } from '../render/debugOverlay.ts';
 import { Bar } from '../render/bars.ts';
+import { Telegraph } from '../render/telegraph.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -47,6 +48,7 @@ export class FightScene extends Phaser.Scene {
   private boat!: Phaser.GameObjects.Rectangle;
   private fish!: Phaser.GameObjects.Rectangle;
   private line!: Phaser.GameObjects.Graphics;
+  private telegraph!: Telegraph;
 
   private hullBar!: Bar;
   private lineBar!: Bar;
@@ -80,6 +82,10 @@ export class FightScene extends Phaser.Scene {
     // Added before the boat and fish so it draws underneath both, and the
     // endpoints disappear into the hull and the body rather than crossing them.
     this.line = this.add.graphics();
+
+    // Underneath them for the same reason. A solid hitbox drawn over the boat
+    // would hide the thing the player is trying to move out of it.
+    this.telegraph = new Telegraph(this);
 
     // Sits on the surface rather than in it, so the waterline reads as the
     // thing the boat is floating on. Only x is simulated; y is a render
@@ -151,6 +157,12 @@ export class FightScene extends Phaser.Scene {
     this.line.lineStyle(1, COLOUR_LINE);
     this.line.lineBetween(boatX, WATER_LINE_Y, fishX, fishY);
 
+    // Phase off the current simulation state, position off the interpolated
+    // values: which phase the fish is in is a discrete fact that must not be
+    // smeared across a frame, but where the box sits has to agree with the fish
+    // drawn at the same instant.
+    this.telegraph.show(this.driver.current.fish.attackPhase, fishX, fishY);
+
     this.updateBars();
     this.updateReadout(delta);
   }
@@ -202,6 +214,14 @@ export class FightScene extends Phaser.Scene {
       // on screen is a prediction of the next hit rather than a second opinion
       // about it.
       attackDamage: basicAttackDamage(tether),
+      fishPhase: fish.attackPhase,
+      // Whichever counter is actually running. While idle the phase has no
+      // duration and the cooldown is the thing ticking down towards the next
+      // attack, so showing the phase's own zero would say nothing.
+      fishPhaseTicks:
+        fish.attackPhase === 'idle'
+          ? fish.attackCooldownRemaining
+          : fish.attackPhaseTicksRemaining,
     });
   }
 }

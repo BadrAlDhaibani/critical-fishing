@@ -24,6 +24,7 @@ import {
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_TICK,
 } from '../data/config.ts';
+import { stepClosePunisher } from './ai/patterns.ts';
 import { basicAttackDamage } from './damage.ts';
 import { lineLength } from './distance.ts';
 import type { FightInputs, FightState } from './state.ts';
@@ -147,9 +148,20 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     line = Math.min(state.boat.lineMax, line + LINE_REGEN_PER_TICK);
   }
 
+  // Stepped against the x this tick just resolved rather than the one it opened
+  // on, for the same reason the player's damage is measured from it: a dash that
+  // carries the boat out of the hitbox this tick has carried it out.
+  //
+  // Nothing here consults dashTicksRemaining. The dash grants no invulnerability
+  // frames, deliberately: it is 55 units of distance, and escaping the box is
+  // done by leaving it rather than by phasing through it. design.md pillar 3
+  // stays literal that way, since every hit is then a question of where the boat
+  // was standing. A test pins this so it cannot drift back.
+  const attack = stepClosePunisher(state.fish, x);
+  const hull = Math.max(0, state.boat.hull - attack.hullDamage);
+
   // Both objects are rebuilt from scratch every tick, so every field has to be
-  // named here or it silently disappears one tick into the fight. Nothing
-  // touches hull yet: 1.9 is what damages it.
+  // named here or it silently disappears one tick into the fight.
   //
   // The fish used to be carried forward by reference, which was only ever safe
   // while nothing wrote to it. The basic attack writes to it.
@@ -157,7 +169,7 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     tick: state.tick + 1,
     boat: {
       x,
-      hull: state.boat.hull,
+      hull,
       hullMax: state.boat.hullMax,
       line,
       lineMax: state.boat.lineMax,
@@ -173,6 +185,10 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       depth: state.fish.depth,
       resistance,
       resistanceMax: state.fish.resistanceMax,
+      attackPhase: attack.attackPhase,
+      attackPhaseTicksRemaining: attack.attackPhaseTicksRemaining,
+      attackCooldownRemaining: attack.attackCooldownRemaining,
+      attackHasHit: attack.attackHasHit,
     },
   };
 }

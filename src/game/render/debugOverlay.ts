@@ -60,6 +60,14 @@ export interface DebugFields {
    * be checked against the resistance dropping.
    */
   attackDamage: number;
+  /**
+   * Which part of its attack cycle the fish is in, and how many ticks of it are
+   * left. On screen because the phases are the fight's timing and only two of
+   * the four are drawn: idle and recovery look identical from the boat, and
+   * telling them apart is the whole read the player is being asked to make.
+   */
+  fishPhase: string;
+  fishPhaseTicks: number;
 }
 
 export class DebugOverlay {
@@ -87,6 +95,7 @@ export class DebugOverlay {
       `tether ${fields.lineLength.toFixed(1)} u`,
       `resist ${fields.resistance}/${fields.resistanceMax}`,
       `dmg    ${fields.attackDamage}`,
+      `fish   ${fields.fishPhase} ${fields.fishPhaseTicks}`,
     ].join('\n');
   }
 }

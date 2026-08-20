@@ -430,3 +430,54 @@ read off the end state.
 
 Rejected: 9 and 4 a second, a constant trickle with no pause, a 60-tick pause,
 and pausing only during a dash.
+
+## 2026-08-19: The close punisher is 45/8/45 for 25 hull, and the dash gets no i-frames
+
+Five of the design.md section 8 open questions answered, plus the
+invulnerability frames question left open at 1.6 on purpose so that 1.9 could
+decide it with something on screen to be invulnerable to.
+
+**45 wind-up, 8 active, 45 recovery, 60 cooldown.** A 60-wide hitbox against a
+24-wide hull puts the boat clear 42 units from the fish's centre, so a dash (55)
+escapes with room and walking out takes 28 ticks, which fits inside the 45-tick
+tell only if it is read immediately. That gap is the point: the dash is
+insurance rather than the only answer, and a player who reads the tell early
+does not have to spend stamina on it. Recovery plus cooldown is 105 ticks of
+safety, about five attacks and 40 stamina, during which the 1.8 refill never
+runs, so the safe window is also the window the pool is emptied in.
+
+**25 hull damage** against the default boat's 100, so four mistakes end a fight.
+A single hit is a real setback rather than a scratch, which is the Souls flavour
+design.md section 1 asks for, but one misread is survivable.
+
+**The fish commits only when the boat is already in range, and the range is the
+hitbox itself.** One predicate, `closePunisherHits`, answers both "does this
+connect" and "is it worth starting", so the two can never drift apart into two
+separately tuned numbers, and the telegraph appearing is always the consequence
+of the player standing somewhere the attack reaches. This is a stand-in for
+attack selection, which arrives with the distance bands at task 1.11, and it was
+chosen over inventing band edges early. Rejected: swinging on a metronome
+regardless of where the boat is, which makes the tell background noise from
+across the lane rather than information.
+
+**No invulnerability frames on the dash.** It buys 55 units of distance and
+nothing else, so escaping the box is done by leaving it rather than by phasing
+through it. design.md pillar 3 stays literal that way, since every hit is then a
+question of where the boat was standing. It is also the easy direction to change
+later: i-frames can be added, but they cannot be taken away once players have
+learned to rely on them. A test pins it. Rejected: full 14-tick invulnerability,
+and i-frames on the first 8 ticks only.
+
+Three implementation notes that are decisions rather than detail. The hitbox is
+re-tested on **every** active tick rather than once as it opens, with an
+`attackHasHit` flag keeping it to one hit per swing, because a boat that dashes
+into a box drawn solid on screen has to be hit by it or the drawing is a lie.
+The wind-up branch of `stepClosePunisher` **does not read the boat at all**,
+which is design.md section 3's commitment rule expressed as code rather than
+promised in a comment. And the telegraph draws **nothing during recovery**:
+reading the recovery and choosing to close is the punish, and marking it on
+screen would do that for the player.
+
+Rejected: 30/6/30 and 60/10/60 timings, 30- and 90-tick cooldowns, 15 and 34
+hull damage, 44- and 80-wide hitboxes, a solid box throughout the wind-up, and
+telegraphing on the fish's own rectangle instead of on the water above it.
