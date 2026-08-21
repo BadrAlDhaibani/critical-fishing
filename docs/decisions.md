@@ -944,3 +944,39 @@ rather than after so the first frame is thrown at the amplitude the hit earned.
 The general form, for the hit flash and anything else drawn on the pixel grid:
 when a floor exists to guarantee something is visible, it has to be applied
 **after** the rounding, not before it.
+
+## 2026-08-20: Hit flash taken literally, and not scaled by damage
+
+Task 2.3. design.md section 6 is exact — "render the struck sprite pure white for
+2 frames" — and it was implemented as written, including the "pure". A flash that
+is a tint of the thing it is flashing reads as the object changing colour; a
+flash that is white reads as being hit.
+
+**Unscaled by damage, unlike the shake beside it.** The two effects split the
+reading: the shake says *how hard*, the flash says *that*, and *which of the two
+it happened to*. Stacking a second magnitude onto the flash would only make the
+lightest hits read as near misses, and the magnitude is already carried.
+
+Known and accepted: `COLOUR_BOAT` is a warm off-white, so the hull's flash has
+much less contrast than the dark fish's. Played and judged fine at 2.3. If it
+ever reads weakly the fix is the hull's colour at the phase 8 art pass, not a
+second flash colour here.
+
+## 2026-08-20: Open finding 1 closed without the sim field it asked for
+
+The finding held that showing the player's landed attack required a new field on
+`FightState`, because nothing recorded that an attack fired. `ImpactWatcher`,
+built for 2.2, made that unnecessary: the basic attack always deals damage when
+it fires, so "an attack landed" and "resistance dropped" are the same event, and
+the fish flashing white is the representation. `sim/` was not touched.
+
+Recorded because the finding was written confidently and was wrong, and the
+reason it was wrong is reusable — **before adding state to record that something
+happened, check whether an existing observable already implies it.** The
+constraint that makes this sound here is that hull and resistance have exactly
+one direction of travel and one cause; it would not hold for a pool that both
+drains and refills.
+
+What actually remains is narrower and is now written into the finding: no visual
+for the attack travelling the line, which is phase 8.2's, and a refused attack
+being silent, which was never actually decided and belongs at 2.5.

@@ -13,17 +13,15 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 2, game feel, still rectangles.
-- **Last completed task:** 2.2, screen shake, closed after two playtest rounds:
-  one fixing light hits that only shook a third of the time, one toning the whole
-  thing down. **2.1 was built and cut**, see the phase 2 list below and
-  decisions.md. Phase 1 is complete apart from 1.2c, still open and still not
-  gameplay-blocking.
-- **Next task:** 2.3, hit flash. _Context: design.md section 6._ Read the feel
-  layer note below first: **2.3 is two things, not one.** The flash itself is
-  small and consumes `game/feel/impacts.ts`. The other half is open finding 1,
-  the player's attack having no on-screen representation at all, which needs a
-  new field on `FightState` and is the larger part. Expect it to be a bigger task
-  than the one line in the phase 2 list suggests.
+- **Last completed task:** 2.3, hit flash. **2.1 was built and cut**, see the
+  phase 2 list below and decisions.md. Phase 1 is complete apart from 1.2c, still
+  open and still not gameplay-blocking.
+- **Next task:** 2.4, core sounds. _Context: design.md section 6._ **The first
+  task in the project that needs assets**, and the project has no audio pipeline,
+  no sound files and no decision about where they come from. Settle that with
+  Badr before writing anything, and remember CLAUDE.md forbids adding
+  dependencies without asking — Phaser's own sound manager needs none, but
+  anything else does.
 - **Phase 1 exited without its twenty-fight exit test.** Badr's deliberate call,
   recorded in decisions.md 2026-08-20. It matters going into phase 2 because
   design.md section 6 says hit stop, shake and flash **hide bad timing**. If the
@@ -42,10 +40,18 @@ the damage. It keeps its own last-seen values rather than reading
 the first of them would already be in both. **2.3 uses this, it does not need a
 new trigger.**
 
-`shake.ts` is the effect. Both count in real milliseconds rather than ticks and
-neither is paced, deliberately: feel is wall-clock, nothing in the simulation is
-timed against it, and design.md states these in frames. `Math.random` lives here
-and nowhere else — `sim/` stays deterministic.
+`shake.ts` and `flash.ts` are the effects. All three modules count in real
+milliseconds rather than ticks, none is paced, and each clamps its delta with
+`MAX_FRAME_MS`: feel is wall-clock, nothing in the simulation is timed against
+it, and design.md states these in frames. That shape has now been used three
+times and belongs in patterns.md, held back only until 2.4 says whether audio
+follows it too. `Math.random` lives here and nowhere else — `sim/` stays
+deterministic.
+
+The division of labour between the two effects is deliberate and worth keeping:
+**the shake says how hard, the flash says which.** That is why the flash is not
+scaled by damage — a flash proportional to a 6-damage chip hit would read as a
+near miss, and the magnitude is already carried.
 
 Two things 2.3 inherits and should not rediscover:
 
@@ -143,12 +149,20 @@ precisely because nothing simulates.
 
 ### Open findings, none of them started
 
-1. **The player's attack has no on-screen representation at all.**
-   `basicAttackDamage` feeds only the debug readout, and nothing on `FightState`
-   records that an attack fired or landed, so this needs a **sim field**, not
-   just a renderer change. Badr asked for it; it belongs to **2.3**, with phase
-   8.2 owning the line-effect version. Note the asymmetry meanwhile: both fish
-   attacks are telegraphed and its shots are drawn, the player's attack is not.
+1. **Mostly closed at 2.3, and the sim field it asked for turned out not to be
+   needed.** The finding said a landed attack could only be shown by adding a
+   field to `FightState`. `ImpactWatcher` disproved that: the basic attack always
+   deals damage when it fires, so "an attack landed" and "resistance dropped" are
+   the same event, and the fish flashing white is the representation. Nothing in
+   `sim/` was touched. Two things genuinely remain, and they are separate:
+   - **No visual for the attack travelling the line.** Phase 8.2's signature
+     visual owns this, as the original finding said. The asymmetry until then:
+     both fish attacks are telegraphed and its shots are drawn, the player's
+     swing is not — only its arrival is.
+   - **A refused attack is silent.** On cooldown or unaffordable, the press does
+     nothing at all and nothing says why. Deliberate for the dash (see
+     `sim/fight.ts`, where all the refusals are silent by design), never actually
+     decided for the attack. Worth raising at **2.5**, the feel tuning pass.
 2. **A second attack in the close band**, the structural fix for close camping
    that round 1 could only narrow with numbers. Makes the grey box fish an
    "uncommon" under design.md section 3's rarity ladder, so it needs a design yes
@@ -282,7 +296,9 @@ honestly how much of the feel comes from mechanics.
 - [x] **2.2 Screen shake.** Short, sharp, decaying, scaled to damage. Closed
       2026-08-20 at 1 to 2 units over 8 frames, both sides' hits shaking. Values
       and the two playtest rounds behind them are in decisions.md.
-- [ ] **2.3 Hit flash.** Struck sprite pure white for 2 frames.
+- [x] **2.3 Hit flash.** Struck sprite pure white for 2 frames. Closed
+      2026-08-20, taken literally from design.md and unscaled by damage. Needed
+      no sim change: see open finding 1 below.
 - [ ] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss.
 - [ ] **2.5 Feel tuning pass.**
 

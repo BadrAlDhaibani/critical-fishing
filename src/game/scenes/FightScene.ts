@@ -25,6 +25,7 @@ import {
   BAR_MARGIN,
   BAR_GAP,
   SHAKE_MAX_AMPLITUDE,
+  COLOUR_HIT_FLASH,
 } from '../../data/config.ts';
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
 import { stepFight } from '../../sim/fight.ts';
@@ -42,6 +43,7 @@ import { Bar } from '../render/bars.ts';
 import { Telegraph } from '../render/telegraph.ts';
 import { Projectiles } from '../render/projectiles.ts';
 import { Shake } from '../feel/shake.ts';
+import { Flash } from '../feel/flash.ts';
 import { ImpactWatcher } from '../feel/impacts.ts';
 
 /**
@@ -76,6 +78,14 @@ export class FightScene extends Phaser.Scene {
    */
   private readonly shake = new Shake();
   private impacts!: ImpactWatcher;
+
+  /**
+   * One flash each, because the two are independent and regularly overlap: the
+   * player's attack and the fish's land in the same tick often enough that a
+   * shared counter would let one cut the other short.
+   */
+  private readonly boatFlash = new Flash();
+  private readonly fishFlash = new Flash();
 
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
@@ -217,10 +227,12 @@ export class FightScene extends Phaser.Scene {
     // fight's numbers.
     this.impacts = new ImpactWatcher(this.driver.current);
 
-    // A shake still running from the killing blow of the last fight must not
-    // open the next one moving. Restarting is an instant cut, the same as the
-    // ending wash it is dismissing.
+    // A shake or a flash still running from the killing blow of the last fight
+    // must not open the next one moving or lit. Restarting is an instant cut,
+    // the same as the ending wash it is dismissing.
     this.shake.reset();
+    this.boatFlash.reset();
+    this.fishFlash.reset();
 
     // Reset alongside `totalTicks`, which the driver has just taken back to
     // zero. Left alone, the tick rate would be a fresh fight's ticks divided by
@@ -251,8 +263,19 @@ export class FightScene extends Phaser.Scene {
     // Sampled after the step, so a hit landed this frame shakes from this frame
     // rather than the next one. Every impact triggers, and `trigger` takes the
     // larger rather than adding, so trading blows is one shake.
+    //
+    // The same list drives the flash, which is what `target` on an impact has
+    // been carried for since 2.2. The shake says how hard and the flash says
+    // which of the two it happened to, so one screen-wide effect and one local
+    // one split the reading between them rather than both saying the same thing.
     for (const impact of this.impacts.sample(this.driver.current)) {
       this.shake.trigger(impact.damage);
+
+      if (impact.target === 'boat') {
+        this.boatFlash.trigger();
+      } else {
+        this.fishFlash.trigger();
+      }
     }
 
     // Moving the camera rather than the objects, so everything drawn moves
@@ -274,6 +297,18 @@ export class FightScene extends Phaser.Scene {
     this.boat.x = boatX;
     this.fish.x = fishX;
     this.fish.y = fishY;
+
+    // Pure white for two frames on being struck, design.md section 6 taken
+    // literally. Set every frame rather than only on the transition: the fill is
+    // this scene's to own, nothing else writes to it, and a flash that had to be
+    // switched off by a matching call would eventually be left on by a path that
+    // forgot to make one.
+    this.boat.setFillStyle(
+      this.boatFlash.update(delta) ? COLOUR_HIT_FLASH : COLOUR_BOAT,
+    );
+    this.fish.setFillStyle(
+      this.fishFlash.update(delta) ? COLOUR_HIT_FLASH : COLOUR_FISH,
+    );
 
     // Redrawn every frame from the same interpolated values the two rectangles
     // use, so the line can never sit a frame behind the things it connects.

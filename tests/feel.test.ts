@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Shake, amplitudeForDamage } from '../src/game/feel/shake.ts';
+import { Flash } from '../src/game/feel/flash.ts';
 import { ImpactWatcher } from '../src/game/feel/impacts.ts';
 import { createFightState } from '../src/sim/state.ts';
 import { TICK_MS } from '../src/sim/loop.ts';
@@ -11,6 +12,7 @@ import {
   SHAKE_MAX_DAMAGE,
   SHAKE_MAX_FRAMES,
   SHAKE_MIN_AMPLITUDE,
+  HIT_FLASH_FRAMES,
 } from '../src/data/config.ts';
 
 /**
@@ -213,6 +215,77 @@ describe('Shake', () => {
 
     expect(shake.current).toBe(0);
     expect(shake.update(TICK_MS)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('Flash', () => {
+  it('is dark until something hits it', () => {
+    expect(new Flash().update(TICK_MS)).toBe(false);
+  });
+
+  it('lights for exactly its full length, then goes dark', () => {
+    const flash = new Flash();
+    flash.trigger();
+
+    let litFrames = 0;
+    for (let i = 0; i < HIT_FLASH_FRAMES * 4; i++) {
+      if (flash.update(TICK_MS)) {
+        litFrames += 1;
+      }
+    }
+
+    expect(litFrames).toBe(HIT_FLASH_FRAMES);
+  });
+
+  it('restarts rather than extends when hit again', () => {
+    // Two hits in quick succession should read as two flashes of the same
+    // length, not as one long one covering both. The duration is what makes it
+    // legible as a flash at all.
+    const flash = new Flash();
+    flash.trigger();
+    flash.update(TICK_MS);
+    flash.trigger();
+
+    let litFrames = 0;
+    for (let i = 0; i < HIT_FLASH_FRAMES * 4; i++) {
+      if (flash.update(TICK_MS)) {
+        litFrames += 1;
+      }
+    }
+
+    expect(litFrames).toBe(HIT_FLASH_FRAMES);
+  });
+
+  it('goes dark on reset, so a restart opens unlit', () => {
+    const flash = new Flash();
+    flash.trigger();
+    flash.reset();
+
+    expect(flash.update(TICK_MS)).toBe(false);
+  });
+
+  it('survives the multi-second delta a backgrounded tab hands out', () => {
+    const flash = new Flash();
+    flash.trigger();
+
+    expect(flash.update(10_000)).toBe(true);
+    expect(flash.update(TICK_MS)).toBe(false);
+  });
+
+  it('runs independently of another flash', () => {
+    // The boat's and the fish's overlap whenever blows are traded, and one must
+    // not cut the other short. That is why the scene owns two rather than one
+    // object tracking both.
+    const boat = new Flash();
+    const fish = new Flash();
+
+    boat.trigger();
+    boat.update(TICK_MS);
+    fish.trigger();
+
+    expect(boat.update(TICK_MS)).toBe(true);
+    expect(boat.update(TICK_MS)).toBe(false);
+    expect(fish.update(TICK_MS)).toBe(true);
   });
 });
 

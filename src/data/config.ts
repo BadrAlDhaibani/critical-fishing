@@ -587,6 +587,31 @@ export const SHAKE_MAX_FRAMES = 8;
 export const SHAKE_MAX_DAMAGE = FISH_CLOSE_HULL_DAMAGE;
 export const SHAKE_DECAY_PER_FRAME = SHAKE_MAX_AMPLITUDE / SHAKE_MAX_FRAMES;
 
+/**
+ * Hit flash. Chosen 2026-08-20, see decisions.md.
+ *
+ * design.md section 6 is exact about this one: render the struck sprite pure
+ * white for 2 frames. Taken literally, including the "pure", because a flash that
+ * is a tint of the thing it is flashing reads as the object changing colour and a
+ * flash that is white reads as being hit.
+ *
+ * Two frames is 33ms, which is short enough that it registers without being
+ * something the eye tracks. It is not scaled by damage, unlike the shake: the
+ * shake says how hard, and stacking a second magnitude on top of it would only
+ * make the smallest hits read as misses. This one says *that*, and *which*.
+ *
+ * **Not paced**, for the reason no feel number is: wall-clock rather than fight
+ * geometry, nothing in the simulation timed against it, and design.md states it
+ * in frames. Converted to milliseconds with TICK_MS at the call site.
+ *
+ * Worth knowing at the phase 8 art pass: COLOUR_BOAT is already a warm off-white,
+ * so the hull's flash has far less contrast to work with than the dark fish's. If
+ * one of the two reads weakly, that is why, and the fix is the hull's colour
+ * rather than this one.
+ */
+export const COLOUR_HIT_FLASH = 0xffffff;
+export const HIT_FLASH_FRAMES = 2;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;
