@@ -82,7 +82,23 @@ Used in: `sim/distance.ts` (`lineLength`), `sim/ai/patterns.ts`
 Approaches tried in this codebase and abandoned. Record what actually broke,
 not the general principle.
 
-Nothing yet.
+### Scaling a random number by an amplitude, then rounding to whole pixels
+
+Used for the screen shake's per-frame camera offset: `round(random * amplitude)`.
+At amplitudes below one unit `Math.round` collapses most frames to zero, so the
+lightest hits shook only about a third of the time while heavy ones looked fine.
+`SHAKE_MIN_AMPLITUDE` existed to guarantee every hit registers and the rounding
+was silently discarding it.
+
+Invisible to the tests, which asserted the offset stayed *within* the amplitude
+and were all passing. Found in play, at max distance from the fish.
+
+Replaced with `max(1, round(amplitude))`, the randomness choosing direction only,
+and the offset emitted before the frame's decay rather than after.
+
+Generalises to anything drawn on the pixel grid, which is everything: **when a
+floor exists to guarantee something is visible, apply it after the rounding, not
+before.**
 
 <!-- Format:
 

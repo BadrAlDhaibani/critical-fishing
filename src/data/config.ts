@@ -535,6 +535,58 @@ export const REEL_IN_LINE_WIDTH = 2;
  */
 export const COLOUR_TELEGRAPH = 0xe07a3c;
 
+/**
+ * Screen shake. Chosen 2026-08-20 and toned down the same day after a playtest,
+ * see decisions.md for both entries.
+ *
+ * design.md section 6: short, sharp, decaying, scaled to damage dealt. Both
+ * sides' hits shake, which is that line read literally, and the scaling is what
+ * keeps it from being constant noise at attack cadence: a typical far-band hit
+ * deals 6 to 10 and moves the frame one unit, while an earned close-range hit
+ * moves it two. The damage-by-distance curve in design.md section 2, made felt
+ * rather than only read off the debug line.
+ *
+ * **Amplitude is in whole internal-resolution units and the offset must stay
+ * whole.** One unit is four physical pixels at 1080p, so a close punisher throws
+ * the frame about eight of them. Fractional camera scroll at a 4x
+ * nearest-neighbour zoom puts everything between physical pixels and shimmers,
+ * which is the same failure `game/config.ts` chose `Phaser.Scale.NONE` to avoid.
+ * The amplitude below decays fractionally; only what reaches the camera rounds.
+ * SHAKE_MIN_AMPLITUDE is a hard floor and not a suggestion: a live shake always
+ * moves the frame by at least one unit, so every hit registers as something. See
+ * `update` in game/feel/shake.ts, where getting that wrong made hits from across
+ * the lane shake only about a third of the time.
+ *
+ * **The duration is derived, not tuned separately.** The shake decays at a fixed
+ * rate, so a bigger one lasts longer for free: 2 units fades over 8 frames and
+ * 1 unit over 4. SHAKE_MAX_FRAMES is how long the heaviest hit in the game lasts
+ * and is authored as such, but what the effect actually runs on is the rate. A
+ * fourth constant holding the duration could only drift away from these.
+ *
+ * The pair below halved from 3 units over 12 frames on "make it a little more
+ * subtle". Both moved together on purpose, so the decay rate stayed at a quarter
+ * unit a frame and only the peak and the length changed: retuning the amplitude
+ * alone would have left a heavy hit trailing eight frames of one-unit jitter,
+ * which reads as buzzing rather than as a decaying jolt. **A hit at the damage
+ * floor is untouched by this** — it was already on SHAKE_MIN_AMPLITUDE for four
+ * frames and still is, which is what keeps the consistency that retune bought.
+ *
+ * SHAKE_MAX_DAMAGE is the close punisher's hull damage rather than a number of
+ * its own, so the biggest shake in the game is pinned to the biggest hit in the
+ * game and the two cannot come apart.
+ *
+ * **Deliberately not paced.** Like every other feel number and unlike every
+ * gameplay duration above, this is not wrapped in `ticksAtPace`. Shake is
+ * wall-clock feel rather than fight geometry: nothing in the simulation is timed
+ * against it, no inequality involves it, and design.md states it in frames.
+ * Frames are converted to milliseconds with TICK_MS at the call site.
+ */
+export const SHAKE_MAX_AMPLITUDE = 2;
+export const SHAKE_MIN_AMPLITUDE = 1;
+export const SHAKE_MAX_FRAMES = 8;
+export const SHAKE_MAX_DAMAGE = FISH_CLOSE_HULL_DAMAGE;
+export const SHAKE_DECAY_PER_FRAME = SHAKE_MAX_AMPLITUDE / SHAKE_MAX_FRAMES;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;

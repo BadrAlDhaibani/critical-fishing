@@ -828,3 +828,119 @@ design.md section 6 warns that hit stop, screen shake and hit flash **hide bad
 timing**, and phase 2 adds all three. If the fight later reads as unfair or as
 mushy, the phase 1 tuning is the first suspect and not the effects layer, and
 `GAME_PACE` is a single number to back off before anything else is touched.
+
+## 2026-08-20: Hit stop built, played and cut
+
+Task 2.1 was implemented and rejected at the playtest gate. At grey box fidelity
+the freeze read as a stutter rather than as impact: there is nothing on screen
+whose motion stopping means anything, so the pause registers as the game
+hitching. Badr's call, made after playing it.
+
+Deferred rather than abandoned — revisit once there are animations to freeze,
+which is the phase 8 art pass or the small pass that may be pulled forward after
+phase 3. **Do not re-implement it before then without asking.**
+
+This sits against design.md section 6, which calls hit stop "the single biggest
+game feel lever that exists" and puts all three feel effects before art
+deliberately. That ordering is now contradicted by a playtest for one of the
+three. design.md is Locked and was not edited; recorded here so the tension is
+visible rather than resolved by silence.
+
+Two implementation findings kept so a reintroduction is not from scratch. The
+freeze itself is one line: skip `driver.advance(delta)` in `FightScene.update`,
+which stops the boat, fish, telegraph, shots and interpolation alpha at once
+because all of them read off the driver. And the trigger needs **no sim field** —
+`boat.hull` and `fish.resistance` are the only damage sinks and nothing heals, so
+watching those two for a drop gives you the fact, the magnitude and which side
+was struck. That watcher survives as `game/feel/impacts.ts`, built for 2.2.
+
+## 2026-08-20: Phase 2 continues as written, hit stop was the odd one out
+
+The cut above put the whole phase in question, since all three effects rest on
+the same "feel before art" bet. Badr's call is that it does not generalise.
+
+Freezing motion is the one effect that depends on there being motion worth
+freezing. Screen shake moves the whole camera and works exactly as well on flat
+rectangles, and hit flash on a solid-colour rectangle is if anything cleaner than
+on detailed art. Shake also costs no wall-clock time, so the pace objection that
+killed hit stop does not apply to it at all.
+
+2.2, 2.3 and 2.4 therefore proceed in order. Each still has to pass the same
+playtest gate on its own, and the precedent set here is that failing it means
+deferring the effect rather than reordering the phase.
+
+## 2026-08-20: Screen shake values, and whose hits shake
+
+Chosen for task 2.2 after the amplitudes were put to Badr as whole-unit offset
+sequences rather than as numbers.
+
+**Punchy: 1 to 3 units over 12 frames at the heaviest.** One unit is one
+internal-resolution pixel and four physical pixels at 1080p, so a close punisher
+throws the frame about twelve physical pixels and decays over a fifth of a
+second. Subtle (1–2 over 8) risked being an effect you have to be told is there;
+heavy (2–5 over 16) is a large fraction of a 480x270 frame and read as the game
+convulsing.
+
+The offset is always a **whole number of units**. Fractional camera scroll at a
+4x nearest-neighbour zoom puts everything between physical pixels and shimmers,
+which is the same failure `game/config.ts` chose `Phaser.Scale.NONE` to avoid.
+The amplitude itself decays fractionally; only what reaches the camera is
+rounded.
+
+**Duration is derived from amplitude, not tuned separately.** The shake decays at
+a fixed rate, so a 3-unit shake fades over 12 frames and a 1-unit one over 4. A
+second scaled number could disagree with the first.
+
+**Both sides' hits shake**, scaled by damage, which is design.md section 6's
+literal "scaled to damage dealt". The scaling is what answers the worry that the
+screen would be moving constantly at attack cadence: a typical far-band hit deals
+6–10 and shakes one unit, near-imperceptible, while an earned close-range hit
+shakes meaningfully. That makes it the damage-by-distance curve made felt, the
+same argument that shaped the hit stop threshold before it was cut, and it is the
+first on-screen feedback the player's attack has ever had.
+
+**Exempt from `GAME_PACE`**, for the reason hit stop was going to be: shake is
+wall-clock feel rather than fight geometry. Nothing in the simulation is timed
+against it, no inequality involves it, and design.md states it in frames.
+
+`Math.random` enters the codebase here and is confined to `game/feel/`. `sim/`
+stays deterministic, and a shake never crosses the wire and never affects the
+fight.
+
+## 2026-08-20: Screen shake toned down to subtle after playtest
+
+Supersedes the amplitude in the entry above. Badr played 2.2, said it felt good
+and flowed well, and asked for it to be a little more subtle. Moved to the
+"Subtle" package that was on the table when the values were first chosen: **1 to
+2 units over 8 frames**, halving the peak throw from twelve physical pixels to
+eight.
+
+Amplitude and duration moved **together**, so the decay rate stayed at a quarter
+unit a frame. Dropping the amplitude alone would have left a heavy hit trailing
+eight frames of one-unit jitter, which reads as buzzing rather than as a decaying
+jolt — the shape of the decay is as much of the feel as its size.
+
+A hit at the damage floor is unchanged by this: it was already on
+`SHAKE_MIN_AMPLITUDE` for four frames and still is. That matters because the same
+playtest round had just fixed those hits shaking only about a third of the time,
+and this retune had to not undo it.
+
+## 2026-08-20: Whole-pixel effects need the floor inside the rounding
+
+Found in play at 2.2, and worth recording because it is invisible to a test that
+only asserts bounds.
+
+The shake's per-frame offset was a random number scaled by the amplitude and then
+rounded to whole units. At the one-unit amplitude every hit at the damage floor
+gets, `Math.round` collapses roughly two frames in three to zero, so hits from
+across the lane shook only sometimes while close-range ones looked solid. The
+floor existed precisely to make every hit register and the rounding was throwing
+it away.
+
+Replaced with a magnitude of `max(1, round(amplitude))`, with the randomness
+choosing direction only, and the offset now emitted **before** the frame's decay
+rather than after so the first frame is thrown at the amplitude the hit earned.
+
+The general form, for the hit flash and anything else drawn on the pixel grid:
+when a floor exists to guarantee something is visible, it has to be applied
+**after** the rounding, not before it.

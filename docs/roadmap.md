@@ -13,16 +13,51 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 2, game feel, still rectangles.
-- **Last completed task:** 1.13, the tuning pass, in two rounds. **Phase 1 is
-  complete apart from 1.2c**, which is still open and still not
+- **Last completed task:** 2.2, screen shake, closed after two playtest rounds:
+  one fixing light hits that only shook a third of the time, one toning the whole
+  thing down. **2.1 was built and cut**, see the phase 2 list below and
+  decisions.md. Phase 1 is complete apart from 1.2c, still open and still not
   gameplay-blocking.
-- **Next task:** 2.1, hit stop. _Context: design.md section 6._
+- **Next task:** 2.3, hit flash. _Context: design.md section 6._ Read the feel
+  layer note below first: **2.3 is two things, not one.** The flash itself is
+  small and consumes `game/feel/impacts.ts`. The other half is open finding 1,
+  the player's attack having no on-screen representation at all, which needs a
+  new field on `FightState` and is the larger part. Expect it to be a bigger task
+  than the one line in the phase 2 list suggests.
 - **Phase 1 exited without its twenty-fight exit test.** Badr's deliberate call,
   recorded in decisions.md 2026-08-20. It matters going into phase 2 because
-  design.md section 6 says hit stop, shake and flash **hide bad timing**, and 2.1
-  to 2.3 add all three. If the fight starts reading as unfair or mushy, suspect
-  the phase 1 tuning before the effects layer, and see `GAME_PACE` below.
+  design.md section 6 says hit stop, shake and flash **hide bad timing**. If the
+  fight starts reading as unfair or mushy, suspect the phase 1 tuning before the
+  effects layer, and see `GAME_PACE` below.
 - **In a half state:** nothing.
+
+### The feel layer
+
+`game/feel/` holds two modules and no Phaser imports. `impacts.ts` is the shared
+trigger: it watches `boat.hull` and `fish.resistance` for drops and reports
+`{ target, damage }`. That works because those are the fight's only two damage
+sinks and nothing heals either, so a drop **is** an impact and its size **is**
+the damage. It keeps its own last-seen values rather than reading
+`driver.previous`, because a slow frame runs several catch-up ticks and a hit on
+the first of them would already be in both. **2.3 uses this, it does not need a
+new trigger.**
+
+`shake.ts` is the effect. Both count in real milliseconds rather than ticks and
+neither is paced, deliberately: feel is wall-clock, nothing in the simulation is
+timed against it, and design.md states these in frames. `Math.random` lives here
+and nowhere else — `sim/` stays deterministic.
+
+Two things 2.3 inherits and should not rediscover:
+
+1. **Apply a visibility floor after the rounding, not before.** The shake's
+   offset is `max(1, round(amplitude))` and not `round(random * amplitude)`. The
+   second collapsed roughly two frames in three to zero at low amplitudes, so the
+   lightest hits shook only sometimes. A flash drawn on the same pixel grid has
+   the same trap. See decisions.md 2026-08-20.
+2. **The camera scrolls, so anything full-screen needs `setScrollFactor(0)` or a
+   margin.** The water rectangle is overdrawn by `SHAKE_MAX_AMPLITUDE` on three
+   sides and the ending tint is pinned to the camera, or a shake pulls the canvas
+   background into view at the edges.
 
 ### Read this before touching any number
 
@@ -238,11 +273,24 @@ before touching anything else.
 Roughly doubles how good it feels. Doing it before art is deliberate: it shows
 honestly how much of the feel comes from mechanics.
 
-- [ ] **2.1 Hit stop.** 3 to 6 frames on heavy impact.
-- [ ] **2.2 Screen shake.** Short, sharp, decaying, scaled to damage.
+- [—] **2.1 Hit stop. Built, played and cut 2026-08-20.** At grey box fidelity
+      the freeze read as a stutter: nothing on screen has motion worth stopping.
+      Deferred to after there are animations to freeze, which is phase 8 or the
+      small art pass that may be pulled forward after phase 3. **Do not
+      re-implement without asking.** See decisions.md, which also keeps the two
+      findings worth reusing.
+- [x] **2.2 Screen shake.** Short, sharp, decaying, scaled to damage. Closed
+      2026-08-20 at 1 to 2 units over 8 frames, both sides' hits shaking. Values
+      and the two playtest rounds behind them are in decisions.md.
 - [ ] **2.3 Hit flash.** Struck sprite pure white for 2 frames.
 - [ ] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss.
 - [ ] **2.5 Feel tuning pass.**
+
+2.1's cut put the whole phase in question, since all three effects rest on the
+same feel-before-art bet. Badr's call is that it does not generalise: freezing
+motion is the one effect that needs motion, and shake and flash both work on flat
+rectangles. Recorded in decisions.md. The precedent is that failing the playtest
+gate defers **that effect**, not the phase.
 
 _Context for all of phase 2: design.md section 6._
 

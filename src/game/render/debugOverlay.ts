@@ -101,6 +101,16 @@ export interface DebugFields {
   fishAttackKind: string | null;
   /** Shots in the air. They outlive the attack, so the phase does not show it. */
   projectiles: number;
+  /**
+   * How far the screen shake is currently throwing the frame, in units, and 0
+   * the rest of the time.
+   *
+   * Fractional, because the amplitude is what decays and only the offset handed
+   * to the camera is rounded. Worth showing because a shake is over in a fifth of
+   * a second and is far easier to argue about as a number than to catch by eye,
+   * and task 2.5 is a tuning pass that will be arguing about it.
+   */
+  shakeAmplitude: number;
 }
 
 /** "far:windUp" while attacking, plain "idle" between attempts. */
@@ -152,6 +162,12 @@ export class DebugOverlay {
       `dmg    ${fields.attackDamage}`,
       `fish   ${attackLabel(fields)} ${fields.fishPhaseTicks}`,
       `shots  ${fields.projectiles}`,
+      // Last, and dropped entirely when nothing is shaking, so its appearing and
+      // disappearing cannot shift any of the lines above it. A permanent "0.0 u"
+      // would be a line that means nothing almost all the time.
+      ...(fields.shakeAmplitude > 0
+        ? [`shake  ${fields.shakeAmplitude.toFixed(1)} u`]
+        : []),
     ].join('\n');
   }
 }

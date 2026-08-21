@@ -24,6 +24,7 @@ import {
   BAR_HEIGHT,
   BAR_MARGIN,
   BAR_GAP,
+  SHAKE_MAX_AMPLITUDE,
 } from '../../data/config.ts';
 import { FixedStepDriver, TICK_HZ, lerp } from '../../sim/loop.ts';
 import { stepFight } from '../../sim/fight.ts';
@@ -40,6 +41,8 @@ import { DebugOverlay } from '../render/debugOverlay.ts';
 import { Bar } from '../render/bars.ts';
 import { Telegraph } from '../render/telegraph.ts';
 import { Projectiles } from '../render/projectiles.ts';
+import { Shake } from '../feel/shake.ts';
+import { ImpactWatcher } from '../feel/impacts.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -63,6 +66,17 @@ export class FightScene extends Phaser.Scene {
 
   private endingTint!: Phaser.GameObjects.Rectangle;
 
+  /**
+   * The shake, and the thing that notices there was something to shake about.
+   *
+   * Fields on the scene rather than render objects, because neither draws
+   * anything: one reports that a pool dropped and the other says where to put
+   * the camera. The scene is what owns the camera and the simulation state, so
+   * it is the only place the two can be joined up.
+   */
+  private readonly shake = new Shake();
+  private impacts!: ImpactWatcher;
+
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
 
@@ -73,12 +87,33 @@ export class FightScene extends Phaser.Scene {
   create(): void {
     const waterHeight = INTERNAL_HEIGHT - WATER_LINE_Y;
 
+    // Overdrawn by one shake's worth on the left, right and bottom, so the
+    // camera offset can never pull an edge of the water into view and flash the
+    // canvas background through it. The sky above the waterline needs no such
+    // margin: it *is* the background, and scrolling reveals more of the same.
+    //
+    // A margin rather than a taller rectangle everywhere, because this is the
+    // one number that has to agree with how far the camera is allowed to move.
+    const bleed = SHAKE_MAX_AMPLITUDE;
+
     this.add
-      .rectangle(0, WATER_LINE_Y, INTERNAL_WIDTH, waterHeight, COLOUR_WATER)
+      .rectangle(
+        -bleed,
+        WATER_LINE_Y,
+        INTERNAL_WIDTH + bleed * 2,
+        waterHeight + bleed,
+        COLOUR_WATER,
+      )
       .setOrigin(0, 0);
 
     this.add
-      .rectangle(0, WATER_LINE_Y, INTERNAL_WIDTH, 1, COLOUR_SURFACE)
+      .rectangle(
+        -bleed,
+        WATER_LINE_Y,
+        INTERNAL_WIDTH + bleed * 2,
+        1,
+        COLOUR_SURFACE,
+      )
       .setOrigin(0, 0);
 
     this.controls = createFightControls(this);
@@ -151,6 +186,11 @@ export class FightScene extends Phaser.Scene {
         ENDING_TINT_ALPHA,
       )
       .setOrigin(0, 0)
+      // Pinned to the camera rather than to the world, so a shake still running
+      // from the killing blow cannot drag a gap in at the edges. It should not
+      // shake with the fight anyway: the wash is the game addressing the player
+      // directly, and it is the one thing on screen that is not in the water.
+      .setScrollFactor(0)
       .setVisible(false);
 
     this.overlay = new DebugOverlay();
@@ -170,6 +210,17 @@ export class FightScene extends Phaser.Scene {
     this.driver = new FixedStepDriver<FightState>(createFightState(), (state) =>
       stepFight(state, this.inputs),
     );
+
+    // Rebuilt alongside the driver for the same reason it is: the watcher holds
+    // the last hull and resistance it saw, and a new fight refills both. Left
+    // alone it would read the first real hit of the new fight against the old
+    // fight's numbers.
+    this.impacts = new ImpactWatcher(this.driver.current);
+
+    // A shake still running from the killing blow of the last fight must not
+    // open the next one moving. Restarting is an instant cut, the same as the
+    // ending wash it is dismissing.
+    this.shake.reset();
 
     // Reset alongside `totalTicks`, which the driver has just taken back to
     // zero. Left alone, the tick rate would be a fresh fight's ticks divided by
@@ -196,6 +247,20 @@ export class FightScene extends Phaser.Scene {
     }
 
     this.driver.advance(delta);
+
+    // Sampled after the step, so a hit landed this frame shakes from this frame
+    // rather than the next one. Every impact triggers, and `trigger` takes the
+    // larger rather than adding, so trading blows is one shake.
+    for (const impact of this.impacts.sample(this.driver.current)) {
+      this.shake.trigger(impact.damage);
+    }
+
+    // Moving the camera rather than the objects, so everything drawn moves
+    // together and nothing has to know the effect exists. Whole units only: at a
+    // 4x nearest-neighbour zoom a fractional scroll puts every edge between
+    // physical pixels and shimmers, and `Shake` is what guarantees that.
+    const offset = this.shake.update(delta);
+    this.cameras.main.setScroll(offset.x, offset.y);
 
     const { previous, current, alpha } = this.driver;
     const { stage } = current;
@@ -332,6 +397,7 @@ export class FightScene extends Phaser.Scene {
           : fish.attackPhaseTicksRemaining,
       fishAttackKind: fish.attackKind,
       projectiles: this.driver.current.projectiles.length,
+      shakeAmplitude: this.shake.current,
     });
   }
 }
