@@ -1203,3 +1203,142 @@ deliberately broken fish in `data/fish/`, watching each rule fire, and deleting
 it. Against a single well-formed fish most of these pass vacuously, which is the
 state the suite will be in most of the time, so a rule added here later should be
 checked the same way.
+
+## 2026-08-21: Three fish by data alone, and where the template stops
+
+Task 3.3. The task was the test of architecture.md section 4's claim that adding
+a fish is never an engine change.
+
+**The claim held.** Three fish went in as three files and one registry line. No
+new field on `FishDefinition`, no third `behaviour`, no line of `sim/` touched.
+The two attack shapes and the numbers authored beside them covered everything
+three deliberately different fish wanted to be. Behaviour-is-code,
+everything-else-is-data survives its first real use.
+
+**All three are `common`, and that is the finding.** `attackForBand` throws on a
+band holding more than one attack, because the weighted roll is not built. So
+design.md section 3's ladder above common is unreachable in data: uncommon *is* a
+second attack in a band, rare *is* two or three attacks per band, and boss needs
+a `phases` field that was never built. Open finding 3 stopped being a gap in the
+attack-selection code and became the thing gating content. It also blocks open
+finding 2. Worth doing before any fish above common is attempted.
+
+**What separates three fish that share one moveset shape.** Not damage numbers,
+which was the expected answer and is the weakest one. It is band geometry
+crossed with resting depth, because line length is euclidean and depth is a leg
+of it. The Managerial Carp's band edge of 150 sits close to the grey box fish's
+140, but its far station of 130 spends almost the whole budget on depth, so its
+close band starts about 36 units horizontally where the grey box fish's starts at
+75. The Deadeye Gar's leaves about 31. The Duelling Perch's leaves about 98. One
+number moved and the fight changed shape. **Depth is the fish-design lever**, and
+it was not obvious before three fish existed to compare.
+
+**The invariant is now load bearing in both directions.** roadmap invariant 1 —
+a station deeper than `maxDistance - FISH_BAND_HYSTERESIS` can never be pulled
+into the band inside it — was a trap with one fish and is a design constraint
+with four. Both the carp and the gar sit exactly 5 units inside it, deliberately,
+because that is where the interesting geometry is. Deepening either means moving
+its band edge with it.
+
+**Two claims in the data files' own prose were wrong before they were right.**
+The first draft carried the grey box fish's horizontal figures across to fish
+with different depths instead of recomputing them. Caught by hand, not by a test,
+and not catchable by one: it was prose. Comments in `data/fish/` are read by
+future sessions as fact, so arithmetic in them gets checked like code.
+
+**Rejected: three fish differing mainly in resistance and damage.** That is the
+version of this task that proves nothing, because it never asks the format a
+question it might fail.
+
+## 2026-08-21: The fish picker reloads rather than swapping live
+
+Also task 3.3, and a consequence of it rather than a plan.
+
+`createFightState` has taken a fish definition since 3.1, but `FightScene` called
+it with no argument, so the grey box fish was the only one anything could play.
+Three fish added as data would have passed every test and been unplayable, and
+CLAUDE.md's definition of done is tests **and** a playtest. So the batch included
+`game/scenes/fishPicker.ts`: DOM buttons beside the audition panel, same reasoning
+that put the debug readout and the cue buttons outside the canvas.
+
+**Selecting a fish reloads the page with `?fish=<id>` instead of swapping the
+fish in the running scene.** Two things size themselves off the definition
+exactly once, at construction: the fish rectangle in `FightScene.create`, and the
+shot pool in `render/projectiles.ts`, sized to the fattest volley the fish has. A
+live swap means resizing one and rebuilding the other — renderer surgery inside
+the one task whose whole claim is that adding a fish touches nothing. A reload
+gets a correctly built scene for free, and costs a page flash a handful of times
+a session against a fight that restarts anyway.
+
+Worth knowing: **that construction-time assumption is still there**, and phase
+4.1's encounter roll is where it comes due. A roll that hands `startFight` a
+different fish mid-session hits exactly the two places this decision routed
+around. The picker is a debug override of that roll once it exists, not a
+replacement for it.
+
+Rejected: a key binding, since `game/input/keyboard.ts` treats a new binding as a
+design proposal rather than a convenience, and this is tooling.
+
+## 2026-08-21: The heavy attack commits
+
+Task 3.4, approved in conversation before implementation. design.md section 2
+only says "ship with exactly one basic and one heavy attack" and the roadmap only
+said "higher cost and damage", so the shape was an open design question and these
+are Badr's answers to it.
+
+**It is a committed wind-up, not a bigger basic.** Pressing it roots the boat for
+a wind-up, and then the hit lands. Rejected: an instant heavy that is simply the
+basic with larger numbers, because whenever the pool could afford it that is
+strictly better and the decision collapses into a resource check rather than a
+read. Also rejected: a heavy dealing flat damage regardless of line length, which
+would have cut against design.md section 2's inverse-distance coupling — the
+thing that section calls the whole fight.
+
+What the commitment buys is **design.md section 3's rule pointed back at the
+player.** The fish cannot cancel a wind-up and now neither can you. Being rooted
+when a telegraph starts is a misread you cannot walk out of, which is design.md
+pillar 3 applied symmetrically.
+
+**Cost is charged at the press; damage resolves at the end of the wind-up**,
+priced at the line length at that moment. Two consequences, both wanted. The
+stamina is gone whether or not it goes well, and the regen delay starts
+immediately. And a fish that dives away mid-wind-up costs you damage without
+doing anything about the attack, which is the distance coupling working on the
+fish's side of the line for the first time.
+
+**Shared cooldown**, loaded into the existing `attackCooldownRemaining` rather
+than a counter of its own. Rejected: independent cooldowns, which make the
+damage-optimal play an alternating rotation nobody has to think about — an MMO
+cadence rather than the Souls flavour of design.md section 1.
+
+**Dash and heavy refuse each other in both directions.** Both are commitments and
+neither is an escape from the other. Note this differs from the basic attack,
+which deliberately does not consult the dash at all.
+
+Values, all authored at pace 1.0:
+
+- `HEAVY_LINE_COST` **20**. Four heavies from a full 80 pool against ten basics.
+- `HEAVY_WINDUP_TICKS` **24**. Deliberately shorter than the shortest fish tell
+  in the game, the duelling perch's 28. **The number most likely to move at
+  playtest.** Against the carp's 55-tick slam you can start a heavy and still
+  clear it; against the perch's jab you cannot. That asymmetry is the read.
+- `HEAVY_COOLDOWN_TICKS` **28**. Kept under `LINE_REGEN_DELAY_TICKS` of 30, so it
+  obeys the same unwritten invariant the basic's cooldown does (roadmap invariant
+  3): attacking at full cadence must stop the refill entirely.
+- `HEAVY_DAMAGE_MULTIPLIER` **3**. The same curve and the same clamps, scaled: 60
+  at full range against the basic's 20, floor 18 against 6. That is 3.0 damage
+  per stamina against the basic's 2.5, so landing one is genuinely better — the
+  counterweight is that the pool holds only four and you had to judge the window.
+
+**Bound to `F`**, per the note in `game/input/keyboard.ts` that an extra binding
+is a design proposal rather than a convenience. Under the index finger with the
+hand on A and D, leaving shift for the dash and space for the basic.
+
+Two smaller calls made in the same conversation. **The wind-up is drawn on the
+line**, in a `COLOUR_HEAVY_LINE` deliberately distinct from `COLOUR_TELEGRAPH`,
+which `config.ts` reserves for "the fish is about to hurt you": a boat rooted for
+24 ticks with no feedback reads as a hang, which is the problem the reel-in
+already solved this way, and design.md pillar 4 wants effects on the line anyway.
+And **no fifth sound cue.** The heavy landing already fires the `attack` cue for
+free, since `ImpactWatcher` sees the resistance drop; only the wind-up is silent,
+which matches the 2.5 decision that a refused attack stays silent.

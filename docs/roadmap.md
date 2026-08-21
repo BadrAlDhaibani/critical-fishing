@@ -13,21 +13,23 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 3, prove the content template.
-- **Last completed task:** 3.2, the fish validation test. Added the registry
-  (`data/fish/index.ts`) and `tests/fish.test.ts`. **3.1 before it** moved every
-  fish number into `src/data/fish/greyBox.ts` and changed none of them, which is
-  the check that it was a move rather than a retune; its three format decisions
-  are in decisions.md 2026-08-21, summarised under "The fish format" below. Phase
+- **Last completed task:** 3.3, three fish by data alone. **The template passed
+  its test**: `duellingPerch.ts`, `managerialCarp.ts` and `deadeyeGar.ts` plus one
+  line in the registry, with no engine change of any kind. It also added
+  `game/scenes/fishPicker.ts`, because nothing could fight a fish that was not the
+  grey box. 3.1 and 3.2 before it built the format and its validation test. Phase
   1 is complete apart from 1.2c, still open and still not gameplay-blocking.
-- **Next task:** 3.3, add fish two, three and four by data only. _Context:
-  architecture.md section 4, design.md sections 2 and 3._ **This is the task the
-  last two were building towards, and its instruction is to stop if it needs an
-  engine edit.** Take that literally. What the format is meant to cover without
-  one is in "The fish format" below; the two things it deliberately does not are
-  a band holding more than one attack (open finding 3 first) and any attack that
-  is not a melee column or a volley. **Ask Badr for the fish**: names, rarities
-  and what each one should feel like are design, not values to invent, and
-  design.md section 8 has no entry to read them off.
+- **Next task:** 3.4, the heavy attack. _Context: design.md section 2,
+  architecture.md section 4._ **Two things must come from Badr before it can be
+  built:** its stamina cost and damage are named in design.md section 8's open
+  questions, so they are asked for rather than invented, and its key binding is a
+  design proposal rather than a convenience — see the header of
+  `game/input/keyboard.ts`. Note it is a *player* attack: it touches
+  `data/config.ts`, `sim/`, and the input layer, and none of the fish work.
+- **Read open finding 3 before planning any more content.** 3.3's finding is that
+  the rarity ladder stops at common until the weighted roll exists. It is now
+  gating content rather than being a gap in attack selection, and it also blocks
+  finding 2. Worth scheduling before any fish above common is attempted.
 - **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
   two of the three effects design.md section 6 warns **hide bad timing**. Badr's
   deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
@@ -38,8 +40,22 @@ Update this block at the end of every batch. Keep it to a few lines.
 
 ### The fish format
 
-`src/data/fish/types.ts` holds the format, `greyBox.ts` the one fish. Read the
-types file first; it is written to be the explanation.
+`src/data/fish/types.ts` holds the format. Read it first; it is written to be the
+explanation. There are **four fish**: `greyBox.ts`, the one phase 1 was tuned
+against and still the default, plus 3.3's `duellingPerch.ts`, `managerialCarp.ts`
+and `deadeyeGar.ts`. All four are `common`, for the reason in open finding 3.
+
+**3.3 proved the claim this format was built to make.** Three fish, three files,
+one registry line, no engine change. If a future fish needs one, that is news and
+belongs in decisions.md.
+
+**What actually differentiates fish is band geometry crossed with resting depth**,
+not damage numbers. Line length is euclidean and depth is a leg of it, so a deep
+station spends most of the band's budget before any horizontal distance counts:
+the carp's close band starts about 36 units horizontally, the gar's about 31, the
+perch's about 98, the grey box fish's 75 — on band edges that only span 115 to
+170. That lever was not visible with one fish. Full working in decisions.md
+2026-08-21, and in each fish file's `BAND_EDGE` comment.
 
 The rule the format is built along is **behaviour is code, everything else is
 data**. A pattern names a `behaviour` — `meleeColumn` or `volley` — which selects
@@ -67,7 +83,16 @@ Four things worth knowing before touching it:
    `telegraph.ts` draws the column at the pattern's own `hitboxWidth` and the
    outline at the fish's own size; `projectiles.ts` sizes its pool and its
    rectangles off the definition. A telegraph at another fish's size is a promise
-   the game cannot keep.
+   the game cannot keep. **Two of those readings happen once, at construction**:
+   the fish rectangle in `FightScene.create` and the shot pool in
+   `projectiles.ts`. That is why 3.3's fish picker reloads the page rather than
+   swapping the fish live, and it is a real debt that **comes due at phase 4.1**,
+   when the encounter roll wants to hand `startFight` a different fish
+   mid-session. See decisions.md 2026-08-21.
+
+**Playing a fish that is not the grey box:** `game/scenes/fishPicker.ts`, DOM
+buttons at the bottom right above the cue audition row, or `?fish=<id>` in the
+URL directly. Debug tooling, and a stand-in for phase 4.1's encounter roll.
 
 What stayed in `data/config.ts` is stated in that file's header, with the test to
 apply before adding a constant: **could two fish disagree about it?** If they
@@ -172,6 +197,11 @@ Since 3.1 every fish number below lives in `src/data/fish/greyBox.ts` rather tha
 in `config.ts`, and belongs to that fish rather than to the game. The two lists
 are kept here together because what they are is one tuned fight.
 
+**These are the grey box fish's numbers only.** 3.3's three fish carry their own
+and are not listed here — read the files, where each number is written next to
+the reasoning for it. Nothing below was retuned when they landed, and none of
+them has been through a tuning pass of its own.
+
 - Default boat hull 100, default line pool 80, grey box fish resistance 400.
   Hull and pool belong to the **boat and line the player has unlocked**, not to
   the game, which is why the maxima live on `FightState` and `data/config.ts`
@@ -248,16 +278,21 @@ precisely because nothing simulates.
    "uncommon" under design.md section 3's rarity ladder, so it needs a design yes.
    **Now pure data**, apart from needing finding 3 first: a second `meleeColumn`
    pattern and a second entry in the close band's list, no engine change.
-3. **Weighted attack selection: the list exists, the roll does not.** design.md
-   section 3 gives each band "a small weighted list", so varied attack choice is
-   on-design. Since 3.1 the format carries `attacks: [{ patternId, weight }]` and
-   `attackForBand` **throws** on more than one entry, so this is now a
-   self-announcing gap rather than a silent one. What it needs is a source of
-   randomness inside a `sim/` that is deterministic on purpose — a seed on
-   `FightState`, advanced per roll, so the same seed and inputs replay the same
-   fight. That is the whole task, and it unblocks finding 2. The boundary that
-   matters and has not moved: design.md forbids random **positioning** and
-   permits weighted random **attack choice**.
+3. **Weighted attack selection: the list exists, the roll does not.** **Promoted
+   by 3.3 to the thing gating content.** design.md section 3 gives each band "a
+   small weighted list", so varied attack choice is on-design. Since 3.1 the
+   format carries `attacks: [{ patternId, weight }]` and `attackForBand`
+   **throws** on more than one entry, so this is a self-announcing gap rather
+   than a silent one. What it needs is a source of randomness inside a `sim/`
+   that is deterministic on purpose — a seed on `FightState`, advanced per roll,
+   so the same seed and inputs replay the same fight. That is the whole task.
+   **Until it lands, every fish in the game must be `common`**: design.md
+   section 3's uncommon *is* a second attack in a band and its rare *is* two or
+   three attacks per band, so both are unbuildable in data, and boss additionally
+   needs a `phases` field that architecture.md section 4 sketches and nothing
+   implements. It also unblocks finding 2. The boundary that matters and has not
+   moved: design.md forbids random **positioning** and permits weighted random
+   **attack choice**.
 4. **Depth variety beyond two resting stations.** design.md section 3 already
    names "drifts shallow when low on resistance". Phase 3.
 5. **`stepFight` reads as six stacked concerns** and names eighteen fields plus a
@@ -314,8 +349,9 @@ precisely because nothing simulates.
 - **`tests/fight.test.ts` has a `DUMMY` fish**, a synthetic definition whose every
   number is unlike the grey box fish's. It is the fixture that catches a value
   which quietly stayed hard-coded: such a value shows up as the grey box fish's
-  number appearing in a fight it is not in. It is not fish two — that is 3.3.
-  It is **not** in `ALL_FISH` and must not be: `tests/fish.test.ts` validates the
+  number appearing in a fight it is not in. It is not one of 3.3's three fish and
+  did not become redundant when they landed: they are all legal, and the point of
+  this one is that it is not. It is **not** in `ALL_FISH` and must not be: `tests/fish.test.ts` validates the
   registry, and a fixture chosen to be strange is not a fish that has to be legal.
 - **A validation test that cannot fail is worth nothing.** Every rule in
   `tests/fish.test.ts` was checked by dropping a deliberately broken fish into
@@ -443,8 +479,11 @@ _Context for all of phase 2: design.md section 6._
       **reachable** patterns plus six other rules a data-only fish could break.
       Every one of them was proved to fail against a deliberately broken fish
       before the batch closed.
-- [ ] **3.3 Add fish two, three and four by data only.** If this needs engine
-      edits, stop: the template is wrong and it is cheapest to fix now.
+- [x] **3.3 Add fish two, three and four by data only.** Closed 2026-08-21. It
+      did **not** need an engine edit: three files and one registry line, no new
+      field, no third `behaviour`, no `sim/` change. Added the fish picker so the
+      three could be played at all. The finding is that the rarity ladder stops
+      at common until open finding 3 lands — see below and decisions.md.
 - [ ] **3.4 Heavy attack.** Second player attack, higher cost and damage.
 
 _Context: architecture.md section 4, design.md sections 2 and 3._
