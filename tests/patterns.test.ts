@@ -1,37 +1,41 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CLOSE_PUNISHER_REACH,
-  FAR_SHOT_REACH,
-  closePunisherHits,
+  meleeColumnHits,
+  meleeReach,
   shotFlightTicks,
+  shotReach,
   stepFishAttack,
   stepProjectiles,
 } from '../src/sim/ai/patterns.ts';
 import { createFightState } from '../src/sim/state.ts';
-import type {
-  FishAttackKind,
-  FishState,
-  ProjectileState,
-} from '../src/sim/state.ts';
+import type { FishState, ProjectileState } from '../src/sim/state.ts';
+import { BOAT_SPEED_PER_TICK, DASH_DISTANCE } from '../src/data/config.ts';
+import { GREY_BOX } from '../src/data/fish/greyBox.ts';
 import {
-  BOAT_SPEED_PER_TICK,
-  DASH_DISTANCE,
-  FISH_CLOSE_ACTIVE_TICKS,
-  FISH_CLOSE_COOLDOWN_TICKS,
-  FISH_CLOSE_HULL_DAMAGE,
-  FISH_CLOSE_RECOVERY_TICKS,
-  FISH_CLOSE_WINDUP_TICKS,
-  FISH_FAR_ACTIVE_TICKS,
-  FISH_FAR_COOLDOWN_TICKS,
-  FISH_FAR_HULL_DAMAGE,
-  FISH_FAR_RECOVERY_TICKS,
-  FISH_FAR_RISE_PER_TICK,
-  FISH_FAR_SHOT_COUNT,
-  FISH_FAR_SHOT_INTERVAL_TICKS,
-  FISH_FAR_TRACK_PER_TICK,
-  FISH_FAR_WINDUP_TICKS,
-  FISH_START_DEPTH,
-} from '../src/data/config.ts';
+  activeTicksOf,
+  meleePatternById,
+  volleyPatternById,
+} from '../src/data/fish/types.ts';
+
+/**
+ * The two patterns this fish has, read off its definition rather than off
+ * config, since task 3.1.
+ *
+ * Narrowed to their behaviours here rather than at each use, because half of
+ * what is tested below is numbers only one behaviour has: a hitbox width, a shot
+ * interval, a climb rate.
+ */
+const LUNGE = meleePatternById(GREY_BOX, 'lunge');
+const VOLLEY = volleyPatternById(GREY_BOX, 'volley');
+
+/** Derived from the shot count and the interval, never authored. */
+const VOLLEY_ACTIVE_TICKS = activeTicksOf(VOLLEY);
+
+const LUNGE_REACH = meleeReach(LUNGE);
+const SHOT_REACH = shotReach(VOLLEY);
+
+/** The depth the fish opens a fight at, which is its outermost band's station. */
+const OPENING_DEPTH = createFightState().fish.depth;
 
 /**
  * A fish built from a real starting state, so growing FishState cannot silently
@@ -65,7 +69,7 @@ interface Run {
   /** Which tick of the run each of those was fired on. */
   spawnTicks: number[];
   /** Every attack the fish committed to during the run. */
-  kinds: Set<FishAttackKind>;
+  kinds: Set<string>;
 }
 
 /**
@@ -78,7 +82,7 @@ function run(fish: FishState, boatX: number, n: number): Run {
   let hits = 0;
   const spawned: ProjectileState[] = [];
   const spawnTicks: number[] = [];
-  const kinds = new Set<FishAttackKind>();
+  const kinds = new Set<string>();
 
   for (let i = 0; i < n; i++) {
     const result = stepFishAttack(next, boatX);
@@ -89,7 +93,7 @@ function run(fish: FishState, boatX: number, n: number): Run {
       spawned.push(shot);
       spawnTicks.push(i);
     }
-    if (result.attackKind !== null) kinds.add(result.attackKind);
+    if (result.attackPatternId !== null) kinds.add(result.attackPatternId);
   }
   return { fish: next, totalDamage, hits, spawned, spawnTicks, kinds };
 }
@@ -104,7 +108,7 @@ function fly(
   let totalDamage = 0;
 
   for (let i = 0; i < n; i++) {
-    const result = stepProjectiles(next, boatX);
+    const result = stepProjectiles(next, boatX, GREY_BOX);
     next = result.projectiles;
     totalDamage += result.hullDamage;
   }
@@ -112,31 +116,27 @@ function fly(
 }
 
 /** One shot, fired from where the fish starts the fight and aimed straight up. */
-function shotAt(x: number, depth = FISH_START_DEPTH, vx = 0): ProjectileState {
-  return { x, depth, vx };
+function shotAt(x: number, depth = OPENING_DEPTH, vx = 0): ProjectileState {
+  return { x, depth, vx, patternId: VOLLEY.id };
 }
 
 describe('closePunisherHits: the hitbox', () => {
   it('catches a boat directly above the fish', () => {
-    expect(closePunisherHits(ON_TOP, ON_TOP)).toBe(true);
+    expect(meleeColumnHits(LUNGE, ON_TOP, ON_TOP)).toBe(true);
   });
 
   it('catches a boat one unit inside the reach', () => {
-    expect(closePunisherHits(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH - 1)).toBe(
-      true,
-    );
+    expect(meleeColumnHits(LUNGE, ON_TOP, ON_TOP + LUNGE_REACH - 1)).toBe(true);
   });
 
   it('lets a boat flush with the edge go', () => {
-    expect(closePunisherHits(ON_TOP, ON_TOP + CLOSE_PUNISHER_REACH)).toBe(
-      false,
-    );
+    expect(meleeColumnHits(LUNGE, ON_TOP, ON_TOP + LUNGE_REACH)).toBe(false);
   });
 
   it('reaches the same distance on both sides', () => {
-    const inside = CLOSE_PUNISHER_REACH - 1;
-    expect(closePunisherHits(ON_TOP, ON_TOP - inside)).toBe(true);
-    expect(closePunisherHits(ON_TOP, ON_TOP + inside)).toBe(true);
+    const inside = LUNGE_REACH - 1;
+    expect(meleeColumnHits(LUNGE, ON_TOP, ON_TOP - inside)).toBe(true);
+    expect(meleeColumnHits(LUNGE, ON_TOP, ON_TOP + inside)).toBe(true);
   });
 
   it('is escapable in one dash, and on foot inside the wind-up', () => {
@@ -144,10 +144,8 @@ describe('closePunisherHits: the hitbox', () => {
     // the dash is insurance rather than the only answer, and reading the tell
     // early enough means walking is enough. A retune that breaks either should
     // fail here rather than during a playtest.
-    expect(CLOSE_PUNISHER_REACH).toBeLessThan(DASH_DISTANCE);
-    expect(CLOSE_PUNISHER_REACH / BOAT_SPEED_PER_TICK).toBeLessThan(
-      FISH_CLOSE_WINDUP_TICKS,
-    );
+    expect(LUNGE_REACH).toBeLessThan(DASH_DISTANCE);
+    expect(LUNGE_REACH / BOAT_SPEED_PER_TICK).toBeLessThan(LUNGE.windUpTicks);
   });
 });
 
@@ -156,8 +154,8 @@ describe('the close punisher: committing to an attack', () => {
     const { fish } = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1);
 
     expect(fish.attackPhase).toBe('windUp');
-    expect(fish.attackKind).toBe('close');
-    expect(fish.attackPhaseTicksRemaining).toBe(FISH_CLOSE_WINDUP_TICKS);
+    expect(fish.attackPatternId).toBe('lunge');
+    expect(fish.attackPhaseTicksRemaining).toBe(LUNGE.windUpTicks);
   });
 
   // The band picks which attack; the hitbox still picks whether it is worth
@@ -177,11 +175,7 @@ describe('the close punisher: committing to an attack', () => {
   });
 
   it('does not swing at a boat flush with the edge of the box', () => {
-    const { fish } = run(
-      fishAt(IN_CLOSE_BAND),
-      ON_TOP + CLOSE_PUNISHER_REACH,
-      1,
-    );
+    const { fish } = run(fishAt(IN_CLOSE_BAND), ON_TOP + LUNGE_REACH, 1);
 
     expect(fish.attackPhase).toBe('idle');
   });
@@ -199,7 +193,7 @@ describe('the close punisher: committing to an attack', () => {
   it('never runs while the fish is in the far band, however close the boat', () => {
     const { kinds, totalDamage } = run(fishAt({ band: 'far' }), ON_TOP, 600);
 
-    expect(kinds.has('close')).toBe(false);
+    expect(kinds.has('lunge')).toBe(false);
     expect(totalDamage).toBe(0);
   });
 
@@ -224,10 +218,10 @@ describe('the close punisher: the phases', () => {
   it('holds the wind-up for exactly its duration', () => {
     const started = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1).fish;
 
-    expect(
-      run(started, ON_TOP, FISH_CLOSE_WINDUP_TICKS - 1).fish.attackPhase,
-    ).toBe('windUp');
-    expect(run(started, ON_TOP, FISH_CLOSE_WINDUP_TICKS).fish.attackPhase).toBe(
+    expect(run(started, ON_TOP, LUNGE.windUpTicks - 1).fish.attackPhase).toBe(
+      'windUp',
+    );
+    expect(run(started, ON_TOP, LUNGE.windUpTicks).fish.attackPhase).toBe(
       'active',
     );
   });
@@ -236,13 +230,13 @@ describe('the close punisher: the phases', () => {
     const opened = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS,
+      1 + LUNGE.windUpTicks,
     ).fish;
 
-    expect(
-      run(opened, ON_TOP, FISH_CLOSE_ACTIVE_TICKS - 1).fish.attackPhase,
-    ).toBe('active');
-    expect(run(opened, ON_TOP, FISH_CLOSE_ACTIVE_TICKS).fish.attackPhase).toBe(
+    expect(run(opened, ON_TOP, LUNGE.activeTicks - 1).fish.attackPhase).toBe(
+      'active',
+    );
+    expect(run(opened, ON_TOP, LUNGE.activeTicks).fish.attackPhase).toBe(
       'recovery',
     );
   });
@@ -251,31 +245,31 @@ describe('the close punisher: the phases', () => {
     const recovering = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+      1 + LUNGE.windUpTicks + LUNGE.activeTicks,
     ).fish;
 
     expect(
-      run(recovering, ON_TOP, FISH_CLOSE_RECOVERY_TICKS - 1).fish.attackPhase,
+      run(recovering, ON_TOP, LUNGE.recoveryTicks - 1).fish.attackPhase,
     ).toBe('recovery');
 
-    const idle = run(recovering, ON_TOP, FISH_CLOSE_RECOVERY_TICKS).fish;
+    const idle = run(recovering, ON_TOP, LUNGE.recoveryTicks).fish;
     expect(idle.attackPhase).toBe('idle');
-    expect(idle.attackCooldownRemaining).toBe(FISH_CLOSE_COOLDOWN_TICKS);
+    expect(idle.attackCooldownRemaining).toBe(LUNGE.cooldownTicks);
   });
 
   it('comes back round to a fresh wind-up after exactly one cycle', () => {
     const cycle =
-      FISH_CLOSE_WINDUP_TICKS +
-      FISH_CLOSE_ACTIVE_TICKS +
-      FISH_CLOSE_RECOVERY_TICKS +
-      FISH_CLOSE_COOLDOWN_TICKS;
+      LUNGE.windUpTicks +
+      LUNGE.activeTicks +
+      LUNGE.recoveryTicks +
+      LUNGE.cooldownTicks;
 
     // One tick to leave idle, then the whole cycle lands the fish back in a
     // wind-up that has just started, having hit once on the way round.
     const { fish, hits } = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1 + cycle);
 
     expect(fish.attackPhase).toBe('windUp');
-    expect(fish.attackPhaseTicksRemaining).toBe(FISH_CLOSE_WINDUP_TICKS);
+    expect(fish.attackPhaseTicksRemaining).toBe(LUNGE.windUpTicks);
     expect(hits).toBe(1);
   });
 });
@@ -288,7 +282,7 @@ describe('the close punisher: commitment', () => {
     const { fish, totalDamage } = run(
       started,
       FAR_AWAY,
-      FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+      LUNGE.windUpTicks + LUNGE.activeTicks,
     );
 
     expect(fish.attackPhase).toBe('recovery');
@@ -298,12 +292,12 @@ describe('the close punisher: commitment', () => {
   it('does not shorten or extend the wind-up based on where the boat is', () => {
     const started = run(fishAt(IN_CLOSE_BAND), ON_TOP, 1).fish;
 
-    expect(
-      run(started, FAR_AWAY, FISH_CLOSE_WINDUP_TICKS - 1).fish.attackPhase,
-    ).toBe('windUp');
-    expect(
-      run(started, FAR_AWAY, FISH_CLOSE_WINDUP_TICKS).fish.attackPhase,
-    ).toBe('active');
+    expect(run(started, FAR_AWAY, LUNGE.windUpTicks - 1).fish.attackPhase).toBe(
+      'windUp',
+    );
+    expect(run(started, FAR_AWAY, LUNGE.windUpTicks).fish.attackPhase).toBe(
+      'active',
+    );
   });
 });
 
@@ -312,11 +306,11 @@ describe('the close punisher: landing the hit', () => {
     const { totalDamage, hits } = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+      1 + LUNGE.windUpTicks + LUNGE.activeTicks,
     );
 
     expect(hits).toBe(1);
-    expect(totalDamage).toBe(FISH_CLOSE_HULL_DAMAGE);
+    expect(totalDamage).toBe(LUNGE.hullDamage);
   });
 
   it('hits a boat that walks in after the hitbox has opened', () => {
@@ -325,28 +319,24 @@ describe('the close punisher: landing the hit', () => {
     const opened = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS,
+      1 + LUNGE.windUpTicks,
     ).fish;
     const grazed = run(opened, FAR_AWAY, 1).fish;
 
     expect(grazed.attackPhase).toBe('active');
 
-    const { totalDamage, hits } = run(
-      grazed,
-      ON_TOP,
-      FISH_CLOSE_ACTIVE_TICKS - 1,
-    );
+    const { totalDamage, hits } = run(grazed, ON_TOP, LUNGE.activeTicks - 1);
     expect(hits).toBe(1);
-    expect(totalDamage).toBe(FISH_CLOSE_HULL_DAMAGE);
+    expect(totalDamage).toBe(LUNGE.hullDamage);
   });
 
   it('charges one swing once however long the boat stands in it', () => {
     const opened = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS,
+      1 + LUNGE.windUpTicks,
     ).fish;
-    const { hits } = run(opened, ON_TOP, FISH_CLOSE_ACTIVE_TICKS);
+    const { hits } = run(opened, ON_TOP, LUNGE.activeTicks);
 
     expect(hits).toBe(1);
   });
@@ -355,9 +345,9 @@ describe('the close punisher: landing the hit', () => {
     const opened = run(
       fishAt(IN_CLOSE_BAND),
       ON_TOP,
-      1 + FISH_CLOSE_WINDUP_TICKS,
+      1 + LUNGE.windUpTicks,
     ).fish;
-    const { totalDamage } = run(opened, FAR_AWAY, FISH_CLOSE_ACTIVE_TICKS);
+    const { totalDamage } = run(opened, FAR_AWAY, LUNGE.activeTicks);
 
     expect(totalDamage).toBe(0);
   });
@@ -368,8 +358,8 @@ describe('the far punisher: committing to a volley', () => {
     const { fish } = run(fishAt(), FAR_AWAY, 1);
 
     expect(fish.attackPhase).toBe('windUp');
-    expect(fish.attackKind).toBe('far');
-    expect(fish.attackPhaseTicksRemaining).toBe(FISH_FAR_WINDUP_TICKS);
+    expect(fish.attackPatternId).toBe('volley');
+    expect(fish.attackPhaseTicksRemaining).toBe(VOLLEY.windUpTicks);
   });
 
   it('needs no range of its own, however close the boat is standing', () => {
@@ -378,7 +368,7 @@ describe('the far punisher: committing to a volley', () => {
     // minimum range here would open a dead ring around the fish.
     const { fish } = run(fishAt(), ON_TOP, 1);
 
-    expect(fish.attackKind).toBe('far');
+    expect(fish.attackPatternId).toBe('volley');
   });
 
   it('runs one attack at a time and never both', () => {
@@ -387,7 +377,7 @@ describe('the far punisher: committing to a volley', () => {
     // and one attack per band is what stops it ever being asked for.
     const { kinds } = run(fishAt(), FAR_AWAY, 600);
 
-    expect([...kinds]).toEqual(['far']);
+    expect([...kinds]).toEqual(['volley']);
   });
 
   it('resolves a volley the boat has since closed in on', () => {
@@ -398,21 +388,21 @@ describe('the far punisher: committing to a volley', () => {
     const { fish, spawned } = run(
       started,
       ON_TOP,
-      FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+      VOLLEY.windUpTicks + VOLLEY_ACTIVE_TICKS,
     );
 
-    expect(fish.attackKind).toBe('far');
+    expect(fish.attackPatternId).toBe('volley');
     expect(fish.attackPhase).toBe('recovery');
-    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+    expect(spawned).toHaveLength(VOLLEY.shotCount);
   });
 
   it('does not shorten or extend the wind-up based on where the boat is', () => {
     const started = run(fishAt(), FAR_AWAY, 1).fish;
 
-    expect(
-      run(started, ON_TOP, FISH_FAR_WINDUP_TICKS - 1).fish.attackPhase,
-    ).toBe('windUp');
-    expect(run(started, ON_TOP, FISH_FAR_WINDUP_TICKS).fish.attackPhase).toBe(
+    expect(run(started, ON_TOP, VOLLEY.windUpTicks - 1).fish.attackPhase).toBe(
+      'windUp',
+    );
+    expect(run(started, ON_TOP, VOLLEY.windUpTicks).fish.attackPhase).toBe(
       'active',
     );
   });
@@ -420,19 +410,19 @@ describe('the far punisher: committing to a volley', () => {
 
 describe('the far punisher: the volley', () => {
   /** One tick to leave idle, then the whole tell. */
-  const OPENED = 1 + FISH_FAR_WINDUP_TICKS;
+  const OPENED = 1 + VOLLEY.windUpTicks;
 
   it('fires the configured number of shots and no more', () => {
-    const { spawned } = run(fishAt(), FAR_AWAY, OPENED + FISH_FAR_ACTIVE_TICKS);
+    const { spawned } = run(fishAt(), FAR_AWAY, OPENED + VOLLEY_ACTIVE_TICKS);
 
-    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+    expect(spawned).toHaveLength(VOLLEY.shotCount);
   });
 
   it('spaces them by the configured interval', () => {
     const { spawnTicks } = run(
       fishAt(),
       FAR_AWAY,
-      OPENED + FISH_FAR_ACTIVE_TICKS,
+      OPENED + VOLLEY_ACTIVE_TICKS,
     );
 
     // The first leaves on the first tick the fish actually spends in the active
@@ -440,15 +430,13 @@ describe('the far punisher: the volley', () => {
     // the two attacks measure their durations the same way.
     expect(spawnTicks[0]).toBe(OPENED);
     for (let i = 1; i < spawnTicks.length; i++) {
-      expect(spawnTicks[i] - spawnTicks[i - 1]).toBe(
-        FISH_FAR_SHOT_INTERVAL_TICKS,
-      );
+      expect(spawnTicks[i] - spawnTicks[i - 1]).toBe(VOLLEY.shotIntervalTicks);
     }
   });
 
   it('fires them from the fish itself, thrown at the boat', () => {
     const fish = fishAt();
-    const { spawned } = run(fish, FAR_AWAY, OPENED + FISH_FAR_ACTIVE_TICKS);
+    const { spawned } = run(fish, FAR_AWAY, OPENED + VOLLEY_ACTIVE_TICKS);
 
     for (const shot of spawned) {
       expect(shot.x).toBe(fish.x);
@@ -456,9 +444,9 @@ describe('the far punisher: the volley', () => {
       // Left alone, the lob puts it on the boat by the time it surfaces. Without
       // that a shot could only reach as far as its tracking cap carried it and a
       // boat across the lane would be safe standing still.
-      expect(shot.x + shot.vx * shotFlightTicks(shot.depth)).toBeCloseTo(
-        FAR_AWAY,
-      );
+      expect(
+        shot.x + shot.vx * shotFlightTicks(VOLLEY, shot.depth),
+      ).toBeCloseTo(FAR_AWAY);
     }
   });
 
@@ -466,49 +454,49 @@ describe('the far punisher: the volley', () => {
     const started = run(fishAt(), FAR_AWAY, 1).fish;
 
     expect(
-      run(started, FAR_AWAY, FISH_FAR_WINDUP_TICKS - 1).fish.attackPhase,
+      run(started, FAR_AWAY, VOLLEY.windUpTicks - 1).fish.attackPhase,
     ).toBe('windUp');
 
-    const opened = run(started, FAR_AWAY, FISH_FAR_WINDUP_TICKS).fish;
+    const opened = run(started, FAR_AWAY, VOLLEY.windUpTicks).fish;
     expect(opened.attackPhase).toBe('active');
-    expect(opened.attackPhaseTicksRemaining).toBe(FISH_FAR_ACTIVE_TICKS);
+    expect(opened.attackPhaseTicksRemaining).toBe(VOLLEY_ACTIVE_TICKS);
 
-    const recovering = run(opened, FAR_AWAY, FISH_FAR_ACTIVE_TICKS).fish;
+    const recovering = run(opened, FAR_AWAY, VOLLEY_ACTIVE_TICKS).fish;
     expect(recovering.attackPhase).toBe('recovery');
-    expect(recovering.attackPhaseTicksRemaining).toBe(FISH_FAR_RECOVERY_TICKS);
+    expect(recovering.attackPhaseTicksRemaining).toBe(VOLLEY.recoveryTicks);
   });
 
   it('reloads its own cooldown rather than the close punisher’s', () => {
     const recovering = run(
       fishAt(),
       FAR_AWAY,
-      OPENED + FISH_FAR_ACTIVE_TICKS,
+      OPENED + VOLLEY_ACTIVE_TICKS,
     ).fish;
-    const idle = run(recovering, FAR_AWAY, FISH_FAR_RECOVERY_TICKS).fish;
+    const idle = run(recovering, FAR_AWAY, VOLLEY.recoveryTicks).fish;
 
     expect(idle.attackPhase).toBe('idle');
-    expect(idle.attackKind).toBe(null);
-    expect(idle.attackCooldownRemaining).toBe(FISH_FAR_COOLDOWN_TICKS);
-    expect(idle.attackCooldownRemaining).not.toBe(FISH_CLOSE_COOLDOWN_TICKS);
+    expect(idle.attackPatternId).toBe(null);
+    expect(idle.attackCooldownRemaining).toBe(VOLLEY.cooldownTicks);
+    expect(idle.attackCooldownRemaining).not.toBe(LUNGE.cooldownTicks);
   });
 
   it('comes back round to a fresh wind-up after exactly one cycle', () => {
     const cycle =
-      FISH_FAR_WINDUP_TICKS +
-      FISH_FAR_ACTIVE_TICKS +
-      FISH_FAR_RECOVERY_TICKS +
-      FISH_FAR_COOLDOWN_TICKS;
+      VOLLEY.windUpTicks +
+      VOLLEY_ACTIVE_TICKS +
+      VOLLEY.recoveryTicks +
+      VOLLEY.cooldownTicks;
     const { fish, spawned } = run(fishAt(), FAR_AWAY, 1 + cycle);
 
     expect(fish.attackPhase).toBe('windUp');
-    expect(fish.attackPhaseTicksRemaining).toBe(FISH_FAR_WINDUP_TICKS);
-    expect(spawned).toHaveLength(FISH_FAR_SHOT_COUNT);
+    expect(fish.attackPhaseTicksRemaining).toBe(VOLLEY.windUpTicks);
+    expect(spawned).toHaveLength(VOLLEY.shotCount);
   });
 });
 
 describe('shots in flight', () => {
   /** Ticks from the fish's starting depth to the surface. */
-  const FLIGHT = shotFlightTicks(FISH_START_DEPTH);
+  const FLIGHT = shotFlightTicks(VOLLEY, OPENING_DEPTH);
 
   it('lands where the boat was standing when it was fired', () => {
     // The lob on its own, with the boat gone from the place it was aimed at, so
@@ -517,8 +505,9 @@ describe('shots in flight', () => {
     const target = ON_TOP - 200;
     const thrown: ProjectileState = {
       x: ON_TOP,
-      depth: FISH_START_DEPTH,
+      depth: OPENING_DEPTH,
       vx: (target - ON_TOP) / FLIGHT,
+      patternId: VOLLEY.id,
     };
 
     let shots = [thrown];
@@ -526,14 +515,14 @@ describe('shots in flight', () => {
       // Well beyond the tracking cap's reach in the time available, so the
       // correction is pinned against it the whole way and cannot be what carries
       // the shot to its target.
-      shots = stepProjectiles(shots, ON_TOP + 400).projectiles;
+      shots = stepProjectiles(shots, ON_TOP + 400, GREY_BOX).projectiles;
     }
 
     // Measured on the last tick before it resolves, so one lob step is still
     // outstanding on top of the correction it has been pulled away by. Without
     // the lob it would still be sitting within fifty units of the fish, which is
     // two hundred short of where it needs to be.
-    const slack = FLIGHT * FISH_FAR_TRACK_PER_TICK + Math.abs(thrown.vx);
+    const slack = FLIGHT * VOLLEY.trackPerTick + Math.abs(thrown.vx);
     expect(shots[0]?.x).toBeGreaterThan(target);
     expect(shots[0]?.x).toBeLessThan(target + slack);
   });
@@ -542,7 +531,7 @@ describe('shots in flight', () => {
     const { projectiles } = fly([shotAt(ON_TOP)], ON_TOP, 1);
 
     expect(projectiles[0]?.depth).toBeCloseTo(
-      FISH_START_DEPTH - FISH_FAR_RISE_PER_TICK,
+      OPENING_DEPTH - VOLLEY.risePerTick,
     );
   });
 
@@ -555,7 +544,7 @@ describe('shots in flight', () => {
 
     const arrived = fly([shotAt(ON_TOP)], ON_TOP, FLIGHT);
     expect(arrived.projectiles).toHaveLength(0);
-    expect(arrived.totalDamage).toBe(FISH_FAR_HULL_DAMAGE);
+    expect(arrived.totalDamage).toBe(VOLLEY.hullDamage);
   });
 
   it('corrects towards the boat more slowly than the boat can walk', () => {
@@ -563,15 +552,15 @@ describe('shots in flight', () => {
     // correction, so the volley is answered by reading it rather than by
     // spending a dash. Pinned as an inequality rather than as a value so the
     // 1.13 tuning pass cannot break it by moving either number.
-    expect(FISH_FAR_TRACK_PER_TICK).toBeLessThan(BOAT_SPEED_PER_TICK);
+    expect(VOLLEY.trackPerTick).toBeLessThan(BOAT_SPEED_PER_TICK);
 
     // Fired straight up, so the correction is the only thing moving it.
     const { projectiles } = fly([shotAt(ON_TOP)], FAR_AWAY, 1);
-    expect(projectiles[0]?.x).toBeCloseTo(ON_TOP - FISH_FAR_TRACK_PER_TICK);
+    expect(projectiles[0]?.x).toBeCloseTo(ON_TOP - VOLLEY.trackPerTick);
   });
 
   it('never oversteers past the boat', () => {
-    const nearly = ON_TOP + FISH_FAR_TRACK_PER_TICK / 2;
+    const nearly = ON_TOP + VOLLEY.trackPerTick / 2;
     const { projectiles } = fly([shotAt(nearly)], ON_TOP, 1);
 
     expect(projectiles[0]?.x).toBeCloseTo(ON_TOP);
@@ -582,15 +571,15 @@ describe('shots in flight', () => {
     // to account for and the boundary can be checked a whole unit either side of
     // itself rather than on top of accumulated arithmetic.
     //
-    // The shot closes FISH_FAR_TRACK_PER_TICK on that last tick, so a boat that
+    // The shot closes VOLLEY.trackPerTick on that last tick, so a boat that
     // much further out is still caught by it. Strict at the edge, the same as
     // the close punisher's hitbox: a shot the player can see they are clear of
     // must not cost them anything.
-    const arriving = shotAt(ON_TOP, FISH_FAR_RISE_PER_TICK);
-    const edge = FAR_SHOT_REACH + FISH_FAR_TRACK_PER_TICK;
+    const arriving = shotAt(ON_TOP, VOLLEY.risePerTick);
+    const edge = SHOT_REACH + VOLLEY.trackPerTick;
 
     expect(fly([arriving], ON_TOP + edge - 1, 1).totalDamage).toBe(
-      FISH_FAR_HULL_DAMAGE,
+      VOLLEY.hullDamage,
     );
     expect(fly([arriving], ON_TOP + edge + 1, 1).totalDamage).toBe(0);
   });
@@ -605,7 +594,7 @@ describe('shots in flight', () => {
 
     for (let i = 0; i < FLIGHT; i++) {
       boatX -= BOAT_SPEED_PER_TICK;
-      const result = stepProjectiles(shots, boatX);
+      const result = stepProjectiles(shots, boatX, GREY_BOX);
       shots = result.projectiles;
       totalDamage += result.hullDamage;
     }
@@ -614,14 +603,12 @@ describe('shots in flight', () => {
   });
 
   it('charges the hull once for every shot that lands', () => {
-    const volley = Array.from({ length: FISH_FAR_SHOT_COUNT }, () =>
+    const volley = Array.from({ length: VOLLEY.shotCount }, () =>
       shotAt(ON_TOP),
     );
     const arrived = fly(volley, ON_TOP, FLIGHT);
 
     expect(arrived.projectiles).toHaveLength(0);
-    expect(arrived.totalDamage).toBe(
-      FISH_FAR_SHOT_COUNT * FISH_FAR_HULL_DAMAGE,
-    );
+    expect(arrived.totalDamage).toBe(VOLLEY.shotCount * VOLLEY.hullDamage);
   });
 });

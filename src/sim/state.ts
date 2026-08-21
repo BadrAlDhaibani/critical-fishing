@@ -10,10 +10,10 @@ import {
   BOAT_START_X,
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
-  FISH_RESISTANCE_MAX,
-  FISH_START_DEPTH,
   FISH_START_X,
 } from '../data/config.ts';
+import { GREY_BOX } from '../data/fish/greyBox.ts';
+import type { FishDefinition } from '../data/fish/types.ts';
 
 export interface BoatState {
   /**
@@ -111,37 +111,27 @@ export interface BoatState {
 export type FishAttackPhase = 'idle' | 'windUp' | 'active' | 'recovery';
 
 /**
- * Which of the fish's attacks the current phase belongs to.
- *
- * design.md section 3 requires both: one that punishes standing close and one
- * that punishes standing far. The fish runs one at a time through the single
- * phase machine above, so this says which, and is null exactly while idle.
- *
- * Which one starts is `band`'s decision, below.
- */
-export type FishAttackKind = 'close' | 'far';
-
-/**
  * Which distance band the fight is in.
  *
- * Two of them for the grey box fish, which is design.md section 3's "common"
- * rarity: two bands, one attack each. Rarer fish get a third band and
- * overlapping attack lists, and none of that changes this type.
+ * design.md section 3's rarity ladder tops out at three bands, so these are the
+ * three names architecture.md section 4 gives. A fish declares the ones it
+ * actually uses in its definition, in order, and the grey box fish uses two of
+ * them: two bands, one attack each, which is the "common" rarity.
  *
- * The same two words as `FishAttackKind` above, and deliberately a separate
- * type. They line up one to one only because this fish has one attack per band;
- * as soon as a band holds two attacks, or an attack appears in both bands, the
- * two stop being the same question. `attackForBand` in sim/ai/bands.ts is the
- * one place that maps between them.
+ * The band never says which attack runs. That is the band's own weighted list in
+ * the fish definition, and `attackForBand` in sim/ai/bands.ts is the one place
+ * the two meet. They read alike only because the grey box fish has one attack per
+ * band and named them after where they are used.
  */
-export type BandId = 'close' | 'far';
+export type BandId = 'close' | 'mid' | 'far';
 
 /**
- * One shot from the far punisher's volley, in flight.
+ * One shot from a volley, in flight.
  *
- * Its climb is constant and its correction is capped, so neither is stored. The
- * lob it was fired with is, because it is decided once, at the moment it leaves
- * the fish, and cannot be worked out again afterwards.
+ * Its climb rate and its correction cap belong to the pattern that fired it, so
+ * neither is stored and `patternId` below is what they are looked up with. The
+ * lob it was thrown with is stored, because it is decided once, at the moment the
+ * shot leaves the fish, and cannot be worked out again afterwards.
  */
 export interface ProjectileState {
   /** Horizontal position in internal-resolution units, at the shot's centre. */
@@ -166,9 +156,38 @@ export interface ProjectileState {
    * the tell and moving answers where they are going to be.
    */
   vx: number;
+  /**
+   * Which of the fish's patterns fired it.
+   *
+   * A shot outlives the attack that fired it, so by the time it is climbing the
+   * fish may be idle or winding up something else and there is nothing left to
+   * read its climb rate, tracking cap, damage and width off. Carrying the id
+   * rather than copying those four numbers onto every shot keeps the state small
+   * and lets one fish own two volleys that behave differently.
+   */
+  patternId: string;
 }
 
 export interface FishState {
+  /**
+   * Which fish this is: every number and every attack it has.
+   *
+   * architecture.md section 4 makes a fish data, so the engine has to be handed
+   * that data somewhere, and riding on the state is what means no function below
+   * `stepFight` needs a second parameter for it. Everything that already takes a
+   * `Pick<FishState, ...>` just names this field too.
+   *
+   * **Read only, and shared by reference.** Nothing in `sim/` mutates, and this is
+   * the one field that is the same object on every tick of a fight rather than a
+   * fresh one, which is safe for exactly that reason.
+   *
+   * The mutable facts about the fish are the fields below it. `resistanceMax` is
+   * seeded from `definition.resistance` rather than read through it, because
+   * design.md section 4 scales resistance by player count in a co-op room: the
+   * definition holds the solo number and the room may start a fight with a bigger
+   * one.
+   */
+  definition: FishDefinition;
   /** Horizontal position in internal-resolution units, at the fish's centre. */
   x: number;
   /**
@@ -203,26 +222,29 @@ export interface FishState {
   /**
    * Which part of the current attack is running, or `idle` between attempts.
    *
-   * Hard-coded to two attacks for now. Task 3.1 is what turns this into a
-   * selection from a fish definition's pattern list; until then `band` picks
-   * which of the two, the close punisher's hitbox decides whether it is worth
-   * starting at all, and a cooldown decides when.
+   * One phase machine for every attack the fish has, whatever its shape: the band
+   * picks which pattern, a melee pattern's hitbox decides whether it is worth
+   * starting at all, and the pattern's own cooldown decides when.
    */
   attackPhase: FishAttackPhase;
   /**
-   * Which attack `attackPhase` belongs to, or null while idle.
+   * Which of the fish's patterns `attackPhase` belongs to, or null while idle.
    *
-   * One phase machine and one cooldown for both attacks rather than a set each,
+   * An id into `definition.patterns` rather than a fixed set of attack names, so
+   * a fish with two melee patterns at different reaches is two data entries and
+   * no engine change.
+   *
+   * One phase machine and one cooldown for every attack rather than a set each,
    * because the fish does one thing at a time. Two independent machines would
    * allow a fish half way through a lunge and a volley at once, which is a state
    * that means nothing, for the same reason three phase counters would be.
    *
-   * The volley's shots are the exception, and deliberately so: once fired they
-   * are entities of their own in `FightState.projectiles` and outlive the attack
-   * that fired them, so the fish can be winding up a close punisher while its
-   * own shots are still climbing.
+   * A volley's shots are the exception, and deliberately so: once fired they are
+   * entities of their own in `FightState.projectiles` and outlive the attack that
+   * fired them, so the fish can be winding up a lunge while its own shots are
+   * still climbing.
    */
-  attackKind: FishAttackKind | null;
+  attackPatternId: string | null;
   /**
    * Ticks left in whichever phase is currently running. Zero while `idle`.
    *
@@ -244,8 +266,8 @@ export interface FishState {
    * that costing the hull once per tick: one swing is one hit, however long the
    * player stands in it. Cleared when a wind-up ends and the next swing opens.
    *
-   * The close punisher's, specifically. The far punisher needs nothing like it,
-   * because each of its shots is consumed the moment it resolves.
+   * A melee column's, specifically. A volley needs nothing like it, because each
+   * of its shots is consumed the moment it resolves.
    */
   attackHasHit: boolean;
 }
@@ -326,14 +348,34 @@ export interface FightInputs {
 }
 
 /**
- * A fight at tick zero. Boat centred, fish off to one side and mid-water, and
- * every pool full on both sides.
+ * A fight at tick zero. Boat centred, fish off to one side at its resting
+ * station, and every pool full on both sides.
  *
- * The only place the default loadout's numbers are read. Everything downstream
- * takes its maxima off the state, so equipping a different boat later means
- * seeding this differently and changing nothing else.
+ * The only place the default loadout's numbers are read, and the only place a
+ * fish definition is turned into a fight. Everything downstream takes its maxima
+ * off the state, so equipping a different boat later means seeding this
+ * differently and changing nothing else, and hooking a different fish means
+ * passing a different definition and changing nothing at all.
+ *
+ * The default argument is not laziness either: phase 4.1's encounter roll is what
+ * will choose the fish, and until it exists every caller wants the one fish there
+ * is.
  */
-export function createFightState(): FightState {
+export function createFightState(fish: FishDefinition = GREY_BOX): FightState {
+  // The band the fight opens in, and the station the fish opens at. Seeded from
+  // the outermost band rather than computed from the geometry, and it has to be:
+  // against the grey box fish the opening line is 141 units, which sits inside
+  // the hysteresis margin, so `bandFor` has no answer of its own to give there.
+  // The band inside the margin is whatever the band already was, and at tick zero
+  // there is no already.
+  //
+  // Outermost is the honest seed as well as the convenient one. The fish opens
+  // the fight at its furthest station and 100 units clear of the boat, so tick
+  // one is its long-range answer winding up and the player has the whole flight
+  // to read it. A fish that opened in its closest band would be swinging before
+  // the player had looked at it.
+  const openingBand = fish.bands[fish.bands.length - 1];
+
   return {
     tick: 0,
     stage: 'fighting',
@@ -352,24 +394,16 @@ export function createFightState(): FightState {
       regenDelayRemaining: 0,
     },
     fish: {
+      definition: fish,
       x: FISH_START_X,
-      depth: FISH_START_DEPTH,
-      resistance: FISH_RESISTANCE_MAX,
-      resistanceMax: FISH_RESISTANCE_MAX,
-      // Seeded rather than computed, and it has to be. The opening line is 141
-      // units, which sits inside the hysteresis margin, so `bandFor` has no
-      // answer of its own to give there: the band inside the margin is whatever
-      // the band already was, and at tick zero there is no already.
-      //
-      // Far is the honest seed as well as the convenient one. The fish opens the
-      // fight at its far-band resting depth and 100 units clear of the boat, so
-      // tick one is a volley winding up and the player has the whole flight to
-      // answer it.
-      band: 'far',
+      depth: openingBand.restingDepth,
+      resistance: fish.resistance,
+      resistanceMax: fish.resistance,
+      band: openingBand.id,
       // Ready rather than on cooldown, so the fish answers the moment the
       // player closes on it.
       attackPhase: 'idle',
-      attackKind: null,
+      attackPatternId: null,
       attackPhaseTicksRemaining: 0,
       attackCooldownRemaining: 0,
       attackHasHit: false,

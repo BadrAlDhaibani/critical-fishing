@@ -5,8 +5,6 @@ import {
   WATER_LINE_Y,
   BOAT_WIDTH,
   BOAT_HEIGHT,
-  FISH_WIDTH,
-  FISH_HEIGHT,
   COLOUR_WATER,
   COLOUR_SURFACE,
   COLOUR_BOAT,
@@ -168,18 +166,24 @@ export class FightScene extends Phaser.Scene {
     // Depth is measured down from the surface, so the waterline is the origin
     // the simulation's vertical axis is expressed against. This is the only
     // place that conversion happens.
+    //
+    // Sized from the fish being fought rather than from a constant, since task
+    // 3.1 made a fish's proportions its own. Sized once, at construction: there
+    // is one fish per fight and restarting reuses it, so this is correct until
+    // phase 4.1's encounter roll can hand `startFight` a different one.
     this.fish = this.add.rectangle(
       initialState.fish.x,
       WATER_LINE_Y + initialState.fish.depth,
-      FISH_WIDTH,
-      FISH_HEIGHT,
+      initialState.fish.definition.width,
+      initialState.fish.definition.height,
       COLOUR_FISH,
     );
 
     // Over the fish and the water but under nothing else, so a shot climbing
     // past the fish that fired it stays readable. It is the one thing on screen
-    // the player has to track continuously.
-    this.projectiles = new Projectiles(this);
+    // the player has to track continuously. Handed the definition for the same
+    // reason the fish rectangle is sized from it: shot widths are per pattern.
+    this.projectiles = new Projectiles(this, initialState.fish.definition);
 
     // Both sides' bars live in the sky above the waterline: the player's
     // stacked at the left, the fish's at the right, so the fight reads as one
@@ -377,7 +381,8 @@ export class FightScene extends Phaser.Scene {
     // that, and the half that does not lie about what happened.
     this.telegraph.show(
       fighting ? current.fish.attackPhase : 'idle',
-      fighting ? current.fish.attackKind : null,
+      fighting ? current.fish.attackPatternId : null,
+      current.fish.definition,
       fishX,
       fishY,
     );
@@ -467,7 +472,10 @@ export class FightScene extends Phaser.Scene {
         fish.attackPhase === 'idle'
           ? fish.attackCooldownRemaining
           : fish.attackPhaseTicksRemaining,
-      fishAttackKind: fish.attackKind,
+      // The pattern's own id now, rather than one of two fixed names, so the
+      // readout says which attack of the fish's is running even once one of them
+      // has several.
+      fishAttackKind: fish.attackPatternId,
       projectiles: this.driver.current.projectiles.length,
       shakeAmplitude: this.shake.current,
     });

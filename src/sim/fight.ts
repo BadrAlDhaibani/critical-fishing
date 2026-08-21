@@ -149,7 +149,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // repositioning on the next line is what moves it and it needs the band first.
   // The fish covers well under a unit a tick, so the band and the length the
   // player's damage is priced against can differ by a fraction at most.
-  const band = bandFor(lineLength({ x }, state.fish), state.fish.band);
+  const band = bandFor(
+    lineLength({ x }, state.fish),
+    state.fish.band,
+    state.fish.definition.bands,
+  );
   const { x: fishX, depth } = stepReposition({ ...state.fish, band }, x);
 
   // Counted down before the press is looked at, so a cooldown of exactly one
@@ -217,7 +221,7 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // The fish is handed the band and the position it has just repositioned to, so
   // an attack committed this tick winds up from where the fish now is rather
   // than from where it was before it moved.
-  const shots = stepProjectiles(state.projectiles, x);
+  const shots = stepProjectiles(state.projectiles, x, state.fish.definition);
   const attack = stepFishAttack({ ...state.fish, band, x: fishX, depth }, x);
   const projectiles = [...shots.projectiles, ...attack.spawned];
 
@@ -266,13 +270,18 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       regenDelayRemaining,
     },
     fish: {
+      // Carried forward rather than rebuilt, and the one field on either object
+      // that is the same instance every tick. It is read-only data about which
+      // fish this is, so sharing it is safe for the same reason `stepEnding`
+      // spreading the whole state is.
+      definition: state.fish.definition,
       x: fishX,
       depth,
       band,
       resistance,
       resistanceMax: state.fish.resistanceMax,
       attackPhase: attack.attackPhase,
-      attackKind: attack.attackKind,
+      attackPatternId: attack.attackPatternId,
       attackPhaseTicksRemaining: attack.attackPhaseTicksRemaining,
       attackCooldownRemaining: attack.attackCooldownRemaining,
       attackHasHit: attack.attackHasHit,

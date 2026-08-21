@@ -13,7 +13,8 @@
  * on `bandFor` below.
  */
 
-import { FISH_BAND_EDGE, FISH_BAND_HYSTERESIS } from '../data/config.ts';
+import { FISH_BAND_HYSTERESIS } from '../data/config.ts';
+import type { BandDefinition } from '../data/fish/types.ts';
 import type { BandId, BoatState, FishState } from './state.ts';
 
 /**
@@ -44,21 +45,41 @@ export function lineLength(
 /**
  * The band a given line length falls in, given the band it is already in.
  *
- * Takes the current band because the edge is not a single line. Below
- * `edge - margin` the answer is always close and above `edge + margin` it is
- * always far, but in between the fish keeps whatever it already had. That is
- * design.md section 3's second fairness rule: without it, a player standing on
- * the boundary makes the fish flip movesets every time the length wobbles by a
- * fraction of a unit, and no read is possible.
+ * Takes the current band because an edge is not a single line. Inside
+ * `edge - margin` the answer is always the nearer band and outside
+ * `edge + margin` it is always the further one, but in between the fish keeps
+ * whatever it already had. That is design.md section 3's second fairness rule:
+ * without it, a player standing on a boundary makes the fish flip movesets every
+ * time the length wobbles by a fraction of a unit, and no read is possible.
  *
  * This is the one thing about the fight's geometry that cannot be derived on
  * demand. The band depends on where the band already was, so it is state, and it
  * lives on the fish rather than being recomputed from scratch like the length
  * it is cut out of.
+ *
+ * Takes the fish's own bands, ordered nearest first, so a fish with three of them
+ * is data rather than an engine change. The walk reads each band's far edge in
+ * turn: inside it minus the margin the answer is that band, still within the
+ * margin the answer is whatever it already was, and otherwise the question moves
+ * outwards to the next band. The outermost band's edge is `Infinity`, which is
+ * what terminates the loop — every length is inside it.
+ *
+ * The margin is the game's rather than the fish's, so it is the same at every
+ * edge of every fish. See `FISH_BAND_HYSTERESIS` in data/config.ts.
  */
-export function bandFor(length: number, current: BandId): BandId {
-  if (length <= FISH_BAND_EDGE - FISH_BAND_HYSTERESIS) return 'close';
-  if (length >= FISH_BAND_EDGE + FISH_BAND_HYSTERESIS) return 'far';
+export function bandFor(
+  length: number,
+  current: BandId,
+  bands: readonly BandDefinition[],
+): BandId {
+  for (const band of bands) {
+    if (length <= band.maxDistance - FISH_BAND_HYSTERESIS) return band.id;
+    if (length < band.maxDistance + FISH_BAND_HYSTERESIS) return current;
+  }
 
-  return current;
+  // Unreachable while the outermost band's edge is Infinity, which every fish
+  // definition sets and no engine code may assume it forgot. Thrown rather than
+  // defaulted to the last band, because a fish whose bands do not cover the whole
+  // lane has a hole in it that silently picking a band would hide.
+  throw new Error(`no band covers a line length of ${length}`);
 }

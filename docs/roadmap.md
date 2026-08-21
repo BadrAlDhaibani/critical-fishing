@@ -13,50 +13,79 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 3, prove the content template.
-- **Last completed task:** 2.5, the feel tuning pass, which **closes phase 2**.
-  It moved no numbers at all — everything was played and kept, see decisions.md.
-  **2.1 was built and cut**, see the phase 2 list below. Phase 1 is complete
-  apart from 1.2c, still open and still not gameplay-blocking.
-- **Next task:** 3.1, extract the fish to a data file. _Context: architecture.md
-  section 4, design.md sections 2 and 3._ Read "What 3.1 is actually walking
-  into" below before starting: it is a wider change than the task line suggests.
+- **Last completed task:** 3.2, the fish validation test. Added the registry
+  (`data/fish/index.ts`) and `tests/fish.test.ts`. **3.1 before it** moved every
+  fish number into `src/data/fish/greyBox.ts` and changed none of them, which is
+  the check that it was a move rather than a retune; its three format decisions
+  are in decisions.md 2026-08-21, summarised under "The fish format" below. Phase
+  1 is complete apart from 1.2c, still open and still not gameplay-blocking.
+- **Next task:** 3.3, add fish two, three and four by data only. _Context:
+  architecture.md section 4, design.md sections 2 and 3._ **This is the task the
+  last two were building towards, and its instruction is to stop if it needs an
+  engine edit.** Take that literally. What the format is meant to cover without
+  one is in "The fish format" below; the two things it deliberately does not are
+  a band holding more than one attack (open finding 3 first) and any attack that
+  is not a melee column or a volley. **Ask Badr for the fish**: names, rarities
+  and what each one should feel like are design, not values to invent, and
+  design.md section 8 has no entry to read them off.
 - **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
   two of the three effects design.md section 6 warns **hide bad timing**. Badr's
   deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
   reading as unfair or mushy, suspect the phase 1 tuning before the effects
   layer, and see `GAME_PACE` below.
-- **In a half state:** nothing.
+- **In a half state:** nothing. **Awaiting a yes:** two proposed edits to
+  architecture.md section 4, listed under open finding 9.
 
-### What 3.1 is actually walking into
+### The fish format
 
-The fight is still hard-coded for one grey box fish. Field names on `FightState`
-already match the architecture.md section 4 sketch, so the `sim/` half is a move
-rather than a rewrite, and nothing has an `id`, a `weight` or a `punishes` yet,
-deliberately. Three things make it bigger than that sentence implies, and all
-three were found by reading the imports rather than by doing the work:
+`src/data/fish/types.ts` holds the format, `greyBox.ts` the one fish. Read the
+types file first; it is written to be the explanation.
 
-1. **The render layer reads fish constants directly.** `game/render/telegraph.ts`
-   imports `FISH_CLOSE_HITBOX_WIDTH`, `FISH_WIDTH`, `FISH_HEIGHT` and
-   `FISH_FAR_TELL_PADDING`; `game/render/projectiles.ts` imports the
-   `FISH_FAR_SHOT_*` values; `FightScene` imports `FISH_WIDTH` and `FISH_HEIGHT`.
-   A definition that only `sim/` reads would draw fish two's telegraph at fish
-   one's size. **The definition has to reach the renderer too**, which is the
-   part of 3.1 most likely to be missed.
-2. **`SHAKE_MAX_DAMAGE` is `FISH_CLOSE_HULL_DAMAGE`.** A `game/feel/` constant
-   pinned to one fish's biggest hit, on purpose, so the biggest shake and the
-   biggest hit could not come apart. Once damage is per-fish, "the biggest hit in
-   the game" stops being a constant. Decide deliberately whether the shake ceiling
-   becomes a game constant or goes per-fish; do not let it silently keep pointing
-   at fish one. `shake.ts` already clamps above it, so nothing breaks loudly.
-3. **Which constants are the fish's and which are the engine's is the real
-   question 3.1 answers**, and `data/config.ts` currently mixes them. The band
-   edges, resting depths, swim and dive rates and both punishers' full timings
-   read as fish data; `FISH_FAR_TELL_PADDING` and the shot dimensions read as
-   presentation. Getting this line wrong is what makes 3.3 need engine edits,
-   which that task says explicitly is the signal to stop.
+The rule the format is built along is **behaviour is code, everything else is
+data**. A pattern names a `behaviour` — `meleeColumn` or `volley` — which selects
+one of the two attack shapes `sim/ai/patterns.ts` implements, and every number
+that shape uses is authored beside it. So a fish with two melee patterns at
+different reaches is two data entries. A fish needing a new *shape* of attack is
+a third behaviour and a branch in that file, which architecture.md section 4 says
+to flag rather than work around. That is the line 3.3 is testing.
 
-Open findings 2, 3 and 4 below are all phase 3 work and all touch `attackForBand`.
-Read them before designing the definition format, not after.
+Four things worth knowing before touching it:
+
+1. **Bands are an ordered array, nearest first, and each states only where it
+   ends** (`Infinity` on the outermost). `BandId` is `'close' | 'mid' | 'far'`,
+   so a three-band rare fish is data. `bandFor` walks the array; its boundary
+   semantics are exactly what they were with one edge, and `tests/distance.test.ts`
+   pins both the two-band and a synthetic three-band walk.
+2. **`attackForBand` throws on a band holding more than one attack.** The format
+   carries `weight`, design.md section 3 asks for the weighted list, and the roll
+   is not built — see open finding 3. The throw is deliberate, so a second attack
+   cannot be added and appear to work. Do not "fix" it by returning the first.
+3. **The definition rides on `FishState` as `fish.definition`**, read-only and
+   shared by reference. It is the one field on either object that is the same
+   instance every tick. A projectile carries `patternId` for the same reason.
+4. **The renderer reads it too**, which is the half that would have been missed.
+   `telegraph.ts` draws the column at the pattern's own `hitboxWidth` and the
+   outline at the fish's own size; `projectiles.ts` sizes its pool and its
+   rectangles off the definition. A telegraph at another fish's size is a promise
+   the game cannot keep.
+
+What stayed in `data/config.ts` is stated in that file's header, with the test to
+apply before adding a constant: **could two fish disagree about it?** If they
+could, it is fish data. `SHAKE_MAX_DAMAGE` is now a game constant authored at 25
+rather than the current fish's biggest hit, so the shake means the same thing
+across every fish; decisions.md has the reasoning.
+
+`data/fish/index.ts` is the registry, and a fish is only in the game once it is in
+that list. `tests/fish.test.ts` reads the directory with `import.meta.glob` and
+fails on a file that is not registered, so half-adding a fish is loud. It then
+checks seven rules over every fish: the design.md section 3 close-and-far
+coverage, which is measured over patterns a band can actually **reach** rather
+than over the `patterns` list, plus six format rules a data-only fish could break
+without failing anything else. All seven were proved to fail against a
+deliberately broken fish before 3.2 closed. Whether a fish is any *good* stays a
+playtest question and is not in there.
+
+Open findings 2, 3 and 4 below are the rest of phase 3's `attackForBand` work.
 
 ### The feel and audio layers
 
@@ -139,6 +168,10 @@ Consequences you need before reading anything else in that file:
 All **authored** values; effective values are these through `GAME_PACE` 1.25.
 These answer parts of design.md section 8 and must not be quietly re-invented.
 
+Since 3.1 every fish number below lives in `src/data/fish/greyBox.ts` rather than
+in `config.ts`, and belongs to that fish rather than to the game. The two lists
+are kept here together because what they are is one tuned fight.
+
 - Default boat hull 100, default line pool 80, grey box fish resistance 400.
   Hull and pool belong to the **boat and line the player has unlocked**, not to
   the game, which is why the maxima live on `FightState` and `data/config.ts`
@@ -164,12 +197,15 @@ These answer parts of design.md section 8 and must not be quietly re-invented.
 Most are pinned by tests and will fail the suite. These three are the traps.
 
 1. **The close band's width comes from `EDGE − HYSTERESIS`, not `EDGE`.** The
-   fish cannot be made deeper unless `FISH_BAND_EDGE` moves with it — at the
-   current edge, depth is capped at 117, and deepening *shrinks* the close band.
-   Depth 125 pairs with edge 160. See decisions.md 2026-08-20.
+   fish cannot be made deeper unless the close band's `maxDistance` moves with it
+   — at the current edge, depth is capped at 117, and deepening *shrinks* the
+   close band. Depth 125 pairs with edge 160. See decisions.md 2026-08-20. Now a
+   per-fish trap rather than a global one: every fish's bands have to satisfy it
+   separately, and the test that pins it reads off `GREY_BOX`.
 2. **Swim speed is capped near 47 by the lane width**, not by the pinned
-   `FISH_SWIM < BOAT_SPEED` inequality, which only holds in an unbounded lane.
-   Above that the fish corners a fleeing boat against a wall permanently.
+   `swimPerTick < BOAT_SPEED_PER_TICK` inequality, which only holds in an
+   unbounded lane. Above that the fish corners a fleeing boat against a wall
+   permanently. Also per-fish now: the cap applies to every fish that approaches.
 3. **Two load-bearing inequalities have no tests at all:**
    `ATTACK_COOLDOWN_TICKS < LINE_REGEN_DELAY_TICKS` (attacking at full cadence
    must stop the refill entirely — the exchange the fight is built on) and
@@ -182,10 +218,9 @@ Most are pinned by tests and will fail the suite. These three are the traps.
 and `bandFor` with its hysteresis. Per architecture.md section 2, and `sim/`
 imports nothing from Phaser.
 
-Still hard-coded for one grey box fish. Task 3.1 extracts fish into data files,
-and writing that format now is building ahead. Field names already match the
-architecture.md section 4 sketch, so it is a move rather than a rewrite. Nothing
-has an `id`, a `weight` or a `punishes` yet, deliberately.
+Since 3.1 none of those four files holds a fish number. They read
+`fish.definition`, and what is left in them is the rules: commitment, hysteresis,
+one hit per swing, the order a tick resolves in.
 
 The order inside `stepFight` is load bearing and not obvious: the band is read
 against the fish's position at the **top** of the tick, because repositioning
@@ -210,13 +245,19 @@ precisely because nothing simulates.
    dash. Both in decisions.md.
 2. **A second attack in the close band**, the structural fix for close camping
    that round 1 could only narrow with numbers. Makes the grey box fish an
-   "uncommon" under design.md section 3's rarity ladder, so it needs a design yes
-   and it builds task 3.1's weighted-list machinery.
-3. **Weighted attack selection is already the design.** design.md section 3 gives
-   each band "a small weighted list", so varied attack choice is on-design, not a
-   change to it. The boundary that matters: design.md forbids random
-   **positioning** and permits weighted random **attack choice**. Lands in
-   `attackForBand`, task 3.1.
+   "uncommon" under design.md section 3's rarity ladder, so it needs a design yes.
+   **Now pure data**, apart from needing finding 3 first: a second `meleeColumn`
+   pattern and a second entry in the close band's list, no engine change.
+3. **Weighted attack selection: the list exists, the roll does not.** design.md
+   section 3 gives each band "a small weighted list", so varied attack choice is
+   on-design. Since 3.1 the format carries `attacks: [{ patternId, weight }]` and
+   `attackForBand` **throws** on more than one entry, so this is now a
+   self-announcing gap rather than a silent one. What it needs is a source of
+   randomness inside a `sim/` that is deterministic on purpose — a seed on
+   `FightState`, advanced per roll, so the same seed and inputs replay the same
+   fight. That is the whole task, and it unblocks finding 2. The boundary that
+   matters and has not moved: design.md forbids random **positioning** and
+   permits weighted random **attack choice**.
 4. **Depth variety beyond two resting stations.** design.md section 3 already
    names "drifts shallow when low on resistance". Phase 3.
 5. **`stepFight` reads as six stacked concerns** and names eighteen fields plus a
@@ -234,10 +275,20 @@ precisely because nothing simulates.
 8. `FixedStepDriver` is not generic over an input type; `FightScene` threads
    inputs in through a closure. The phase 7 server will likely want
    `advance(frameMs, inputs)`. Deferred rather than churn eight call sites.
-9. architecture.md section 2 does not list `sim/loop.ts`, which exists, and its
-   `step(state, inputs, dt)` sketch should drop the `dt` since one call is
-   exactly one tick. Two one-line edits proposed, both **still waiting on a yes**.
-   Firm tier, do not write them unprompted.
+9. **Four architecture.md edits proposed, all waiting on a yes.** Firm tier, do
+   not write them unprompted. The first two are from phase 1; the last two are
+   3.1 reporting where the built format differs from the section 4 sketch, which
+   that section says is "to be firmed up in phase 3".
+   - Section 2 does not list `sim/loop.ts`, which exists.
+   - Its `step(state, inputs, dt)` sketch should drop the `dt`, since one call is
+     exactly one tick.
+   - Section 4's bands carry `minDistance, maxDistance`; the built format carries
+     `maxDistance` only, because the previous band's end already is the next
+     one's start and two copies of one boundary can disagree.
+   - Section 4's patterns have no `behaviour` field, and it is the field the
+     whole "adding a fish is never an engine change" claim rests on. The sketch's
+     `hitbox` is also not general enough to cover a volley, which has a shot
+     width, a count, an interval and two rates instead.
 10. `npm run format` reformats `docs/design.md` and `CLAUDE.md`, repadding their
     markdown tables. Whitespace only, but design.md is Locked tier, so the
     reformat gets reverted by hand each time. A `.prettierignore` covering both
@@ -256,8 +307,21 @@ precisely because nothing simulates.
   literals by spreading `noInputs()`, so growing either type does not break them.
 - The pool is fractional, so tests on it need `toBeCloseTo`, and how much was
   spent cannot be read off the final pool. Use the `lowestLine` helper.
-- The suite derives from `config.ts` rather than hard-coding ticks, which is why
-  all 198 tests survived `GAME_PACE` with no edits. Keep it that way.
+- The suite derives from named data rather than hard-coding ticks, which is why
+  all 198 tests survived `GAME_PACE` with no edits and why 3.1 changed imports
+  rather than assertions. Since 3.1 the fish half of that data is read off
+  `GREY_BOX` and its patterns rather than off `config.ts`. Keep it that way.
+- **`tests/fight.test.ts` has a `DUMMY` fish**, a synthetic definition whose every
+  number is unlike the grey box fish's. It is the fixture that catches a value
+  which quietly stayed hard-coded: such a value shows up as the grey box fish's
+  number appearing in a fight it is not in. It is not fish two — that is 3.3.
+  It is **not** in `ALL_FISH` and must not be: `tests/fish.test.ts` validates the
+  registry, and a fixture chosen to be strange is not a fish that has to be legal.
+- **A validation test that cannot fail is worth nothing.** Every rule in
+  `tests/fish.test.ts` was checked by dropping a deliberately broken fish into
+  `data/fish/`, watching it fail, and deleting it. Do the same for any rule added
+  there — several of these rules pass vacuously against a single well-formed fish,
+  which is exactly the state the suite is in most of the time.
 
 ---
 
@@ -369,10 +433,16 @@ _Context for all of phase 2: design.md section 6._
 
 ## Phase 3: prove the content template
 
-- [ ] **3.1 Extract the fish to a data file.** Bars, attacks, timings, damage,
-      bands. Engine reads the definition.
-- [ ] **3.2 Fish validation test.** Assert every fish has both a close punisher
-      and a far punisher.
+- [x] **3.1 Extract the fish to a data file.** Bars, attacks, timings, damage,
+      bands. Engine reads the definition. Closed 2026-08-21 having changed no
+      numbers. Format and its three decisions in decisions.md; the summary is in
+      "The fish format" at the top of this file.
+- [x] **3.2 Fish validation test.** Assert every fish has both a close punisher
+      and a far punisher. Closed 2026-08-21. Added `data/fish/index.ts` as the
+      registry and `tests/fish.test.ts`, which checks the coverage rule over
+      **reachable** patterns plus six other rules a data-only fish could break.
+      Every one of them was proved to fail against a deliberately broken fish
+      before the batch closed.
 - [ ] **3.3 Add fish two, three and four by data only.** If this needs engine
       edits, stop: the template is wrong and it is cheapest to fix now.
 - [ ] **3.4 Heavy attack.** Second player attack, higher cost and damage.

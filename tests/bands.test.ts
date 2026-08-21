@@ -1,22 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import {
-  attackForBand,
-  restingDepth,
-  stepReposition,
-} from '../src/sim/ai/bands.ts';
-import { CLOSE_PUNISHER_REACH } from '../src/sim/ai/patterns.ts';
+import { attackForBand, stepReposition } from '../src/sim/ai/bands.ts';
+import { meleeReach } from '../src/sim/ai/patterns.ts';
 import { createFightState } from '../src/sim/state.ts';
-import type { BandId, FishState } from '../src/sim/state.ts';
+import type { FishState } from '../src/sim/state.ts';
 import {
-  BOAT_SPEED_PER_SECOND,
-  FISH_BAND_EDGE,
+  BOAT_SPEED_PER_TICK,
   FISH_BAND_HYSTERESIS,
-  FISH_CLOSE_BAND_DEPTH,
-  FISH_DIVE_PER_TICK,
-  FISH_FAR_BAND_DEPTH,
-  FISH_SWIM_PER_SECOND,
-  FISH_SWIM_PER_TICK,
 } from '../src/data/config.ts';
+import { GREY_BOX } from '../src/data/fish/greyBox.ts';
+import { bandById, meleePatternById } from '../src/data/fish/types.ts';
+
+// Read off the fish rather than off config, since task 3.1. What the engine
+// still owns is the hysteresis margin and the boat, which is why those two are
+// the only constants left above.
+const CLOSE_BAND = bandById(GREY_BOX, 'close');
+const FAR_BAND = bandById(GREY_BOX, 'far');
+const BAND_EDGE = CLOSE_BAND.maxDistance;
+const LUNGE = meleePatternById(GREY_BOX, 'lunge');
+const LUNGE_REACH = meleeReach(LUNGE);
 
 /**
  * A fish built from a real starting state, so growing FishState cannot silently
@@ -38,24 +39,55 @@ function swim(fish: FishState, boatX: number, n: number): FishState {
 
 /** How far a fish in this band can be horizontally and still be in it. */
 function closeBandWidth(depth: number): number {
-  return Math.sqrt((FISH_BAND_EDGE - FISH_BAND_HYSTERESIS) ** 2 - depth ** 2);
+  return Math.sqrt((BAND_EDGE - FISH_BAND_HYSTERESIS) ** 2 - depth ** 2);
 }
 
 describe('attackForBand: selecting by band', () => {
-  it('answers the close band with the close punisher', () => {
-    expect(attackForBand('close')).toBe('close');
-  });
-
-  it('answers the far band with the volley', () => {
-    expect(attackForBand('far')).toBe('far');
+  it('answers each band with the attack its list names', () => {
+    expect(attackForBand(GREY_BOX, 'close')).toBe('lunge');
+    expect(attackForBand(GREY_BOX, 'far')).toBe('volley');
   });
 
   // design.md section 3's no-safe-camping-spot rule, from the selection side of
   // it. Both attacks have to be reachable or one position on the lane is free.
-  it('reaches both attacks between the two bands', () => {
-    const bands: BandId[] = ['close', 'far'];
+  it('reaches a different attack in each band', () => {
+    const reachable = GREY_BOX.bands.map((band) =>
+      attackForBand(GREY_BOX, band.id),
+    );
 
-    expect(new Set(bands.map(attackForBand)).size).toBe(2);
+    expect(new Set(reachable).size).toBe(GREY_BOX.bands.length);
+  });
+
+  /**
+   * The guard that keeps a half-built feature honest. design.md section 3 gives
+   * each band "a small weighted list" and the format carries the weights, but
+   * the roll that would read them needs a seeded RNG inside a deterministic
+   * `sim/` and is its own task.
+   *
+   * Until then a second attack in a band must fail loudly. Returning the first
+   * entry instead would make a data change look like it worked, play like it did
+   * nothing, and cost a playtest to notice.
+   */
+  it('refuses a band holding more than one attack, for now', () => {
+    const twoAttacks = {
+      ...GREY_BOX,
+      bands: [
+        {
+          ...CLOSE_BAND,
+          attacks: [
+            { patternId: 'lunge', weight: 1 },
+            { patternId: 'volley', weight: 1 },
+          ],
+        },
+        FAR_BAND,
+      ],
+    };
+
+    expect(() => attackForBand(twoAttacks, 'close')).toThrow(/selection/);
+  });
+
+  it('refuses a band the fish does not have', () => {
+    expect(() => attackForBand(GREY_BOX, 'mid')).toThrow(/no band/);
   });
 });
 
@@ -69,8 +101,8 @@ describe('the shape of the bands', () => {
   // never fire once, which is design.md section 3's no-safe-camping-spot rule
   // broken from the fish's side of it.
   it('lets a boat directly overhead pull a resting fish into the close band', () => {
-    expect(FISH_FAR_BAND_DEPTH).toBeLessThanOrEqual(
-      FISH_BAND_EDGE - FISH_BAND_HYSTERESIS,
+    expect(FAR_BAND.restingDepth).toBeLessThanOrEqual(
+      BAND_EDGE - FISH_BAND_HYSTERESIS,
     );
   });
 
@@ -78,22 +110,18 @@ describe('the shape of the bands', () => {
   // close band when it could already swing, and the approach would have no
   // ground to cover.
   it('opens a close band wider than the hitbox at its centre', () => {
-    expect(closeBandWidth(FISH_FAR_BAND_DEPTH)).toBeGreaterThan(
-      CLOSE_PUNISHER_REACH,
-    );
+    expect(closeBandWidth(FAR_BAND.restingDepth)).toBeGreaterThan(LUNGE_REACH);
   });
 
   // The same inequality the volley's tracking cap is held to, for the same
   // reason: an approach the boat cannot outwalk turns the dash from insurance
   // into the only answer.
   it('swims more slowly than the boat walks', () => {
-    expect(FISH_SWIM_PER_SECOND).toBeLessThan(BOAT_SPEED_PER_SECOND);
+    expect(GREY_BOX.swimPerTick).toBeLessThan(BOAT_SPEED_PER_TICK);
   });
 
   it('rises in the close band and sinks in the far one', () => {
-    expect(FISH_CLOSE_BAND_DEPTH).toBeLessThan(FISH_FAR_BAND_DEPTH);
-    expect(restingDepth('close')).toBe(FISH_CLOSE_BAND_DEPTH);
-    expect(restingDepth('far')).toBe(FISH_FAR_BAND_DEPTH);
+    expect(CLOSE_BAND.restingDepth).toBeLessThan(FAR_BAND.restingDepth);
   });
 
   // The close band is deliberately harder to leave than to enter, because the
@@ -101,9 +129,9 @@ describe('the shape of the bands', () => {
   // accidentally inverted it would fail here rather than read as the fish
   // flickering between movesets during a playtest.
   it('is harder to break out of than it was to fall into', () => {
-    const entering = closeBandWidth(FISH_FAR_BAND_DEPTH);
+    const entering = closeBandWidth(FAR_BAND.restingDepth);
     const leaving = Math.sqrt(
-      (FISH_BAND_EDGE + FISH_BAND_HYSTERESIS) ** 2 - FISH_CLOSE_BAND_DEPTH ** 2,
+      (BAND_EDGE + FISH_BAND_HYSTERESIS) ** 2 - CLOSE_BAND.restingDepth ** 2,
     );
 
     expect(leaving).toBeGreaterThan(entering);
@@ -114,28 +142,32 @@ describe('stepReposition: depth', () => {
   it('rises towards the close band depth', () => {
     const after = stepReposition(fishAt({ band: 'close' }), 0);
 
-    expect(after.depth).toBeCloseTo(FISH_FAR_BAND_DEPTH - FISH_DIVE_PER_TICK);
+    expect(after.depth).toBeCloseTo(
+      FAR_BAND.restingDepth - GREY_BOX.divePerTick,
+    );
   });
 
   it('sinks towards the far band depth', () => {
-    const shallow = fishAt({ band: 'far', depth: FISH_CLOSE_BAND_DEPTH });
+    const shallow = fishAt({ band: 'far', depth: CLOSE_BAND.restingDepth });
     const after = stepReposition(shallow, 0);
 
-    expect(after.depth).toBeCloseTo(FISH_CLOSE_BAND_DEPTH + FISH_DIVE_PER_TICK);
+    expect(after.depth).toBeCloseTo(
+      CLOSE_BAND.restingDepth + GREY_BOX.divePerTick,
+    );
   });
 
   it('arrives exactly on the resting depth rather than overshooting it', () => {
-    const travel = FISH_FAR_BAND_DEPTH - FISH_CLOSE_BAND_DEPTH;
-    const ticks = Math.ceil(travel / FISH_DIVE_PER_TICK);
+    const travel = FAR_BAND.restingDepth - CLOSE_BAND.restingDepth;
+    const ticks = Math.ceil(travel / GREY_BOX.divePerTick);
     const after = swim(fishAt({ band: 'close' }), 0, ticks);
 
-    expect(after.depth).toBe(FISH_CLOSE_BAND_DEPTH);
+    expect(after.depth).toBe(CLOSE_BAND.restingDepth);
   });
 
   it('holds station once it is there, however long it waits', () => {
-    const resting = fishAt({ band: 'close', depth: FISH_CLOSE_BAND_DEPTH });
+    const resting = fishAt({ band: 'close', depth: CLOSE_BAND.restingDepth });
 
-    expect(swim(resting, resting.x, 600).depth).toBe(FISH_CLOSE_BAND_DEPTH);
+    expect(swim(resting, resting.x, 600).depth).toBe(CLOSE_BAND.restingDepth);
   });
 
   it('opens a fight already at its resting depth', () => {
@@ -143,7 +175,7 @@ describe('stepReposition: depth', () => {
     // the depth that band wants, so nothing drifts on tick one.
     const start = createFightState().fish;
 
-    expect(start.depth).toBe(restingDepth(start.band));
+    expect(start.depth).toBe(bandById(GREY_BOX, start.band).restingDepth);
   });
 });
 
@@ -152,20 +184,20 @@ describe('stepReposition: closing the distance', () => {
     const fish = fishAt({ band: 'close' });
     const after = stepReposition(fish, fish.x - 200);
 
-    expect(after.x).toBeCloseTo(fish.x - FISH_SWIM_PER_TICK);
+    expect(after.x).toBeCloseTo(fish.x - GREY_BOX.swimPerTick);
   });
 
   it('goes the other way for a boat on the other side', () => {
     const fish = fishAt({ band: 'close' });
     const after = stepReposition(fish, fish.x + 200);
 
-    expect(after.x).toBeCloseTo(fish.x + FISH_SWIM_PER_TICK);
+    expect(after.x).toBeCloseTo(fish.x + GREY_BOX.swimPerTick);
   });
 
   // The volley already reaches the whole lane, so a far-band fish has no reason
   // to chase, and one that did would eventually walk every fight into a wall.
   it('holds its ground in the far band', () => {
-    const fish = fishAt({ band: 'far', depth: FISH_FAR_BAND_DEPTH });
+    const fish = fishAt({ band: 'far', depth: FAR_BAND.restingDepth });
 
     expect(swim(fish, fish.x - 200, 600).x).toBe(fish.x);
   });
@@ -181,14 +213,14 @@ describe('stepReposition: closing the distance', () => {
     // The approach is the answer to a close band wider than the box at its
     // centre. If it could not cross that gap the fish would sit in it doing
     // nothing, which is the dead spot task 1.10 removed from the lane.
-    const fish = fishAt({ band: 'close', depth: FISH_CLOSE_BAND_DEPTH });
-    const boatX = fish.x - closeBandWidth(FISH_CLOSE_BAND_DEPTH);
+    const fish = fishAt({ band: 'close', depth: CLOSE_BAND.restingDepth });
+    const boatX = fish.x - closeBandWidth(CLOSE_BAND.restingDepth);
     const ticks = Math.ceil(
-      (Math.abs(fish.x - boatX) - CLOSE_PUNISHER_REACH) / FISH_SWIM_PER_TICK,
+      (Math.abs(fish.x - boatX) - LUNGE_REACH) / GREY_BOX.swimPerTick,
     );
 
     expect(Math.abs(swim(fish, boatX, ticks).x - boatX)).toBeLessThan(
-      CLOSE_PUNISHER_REACH,
+      LUNGE_REACH,
     );
   });
 
@@ -210,7 +242,11 @@ describe('stepReposition: an attack pins the fish', () => {
   // fired from, so a fish that rose mid-wind-up would shorten the warning it had
   // already started giving.
   it.each(PHASES)('does not move at all during %s', (attackPhase) => {
-    const fish = fishAt({ band: 'close', attackPhase, attackKind: 'close' });
+    const fish = fishAt({
+      band: 'close',
+      attackPhase,
+      attackPatternId: 'lunge',
+    });
     const after = swim(fish, fish.x - 200, 200);
 
     expect(after.x).toBe(fish.x);
@@ -221,7 +257,7 @@ describe('stepReposition: an attack pins the fish', () => {
     const busy = fishAt({
       band: 'close',
       attackPhase: 'recovery',
-      attackKind: 'close',
+      attackPatternId: 'lunge',
     });
     const idle = swim({ ...busy, attackPhase: 'idle' }, busy.x - 200, 1);
 

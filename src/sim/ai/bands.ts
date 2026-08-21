@@ -11,38 +11,44 @@
  * luck. Nothing in here reads a random number, and there is nowhere one could be
  * added without the two rules below stopping making sense.
  *
+ * Every number this file works with comes off the fish's definition. What is left
+ * here is the two rules themselves, which are the engine's.
+ *
  * Durations count in ticks, like everything else in sim/. One call to
  * `stepReposition` is exactly one tick.
  */
 
-import {
-  FISH_CLOSE_BAND_DEPTH,
-  FISH_DIVE_PER_TICK,
-  FISH_FAR_BAND_DEPTH,
-  FISH_SWIM_PER_TICK,
-} from '../../data/config.ts';
-import type { BandId, FishAttackKind, FishState } from '../state.ts';
+import { bandById } from '../../data/fish/types.ts';
+import type { FishDefinition } from '../../data/fish/types.ts';
+import type { BandId, FishState } from '../state.ts';
 
 /**
- * The attack this band's list holds.
+ * Which of the band's attacks the fish commits to.
  *
- * One attack per band, which is design.md section 3's "common" rarity, so the
- * list is not a list yet and there is no weighted roll to make. Task 3.1 is what
- * turns this into a lookup in a fish definition, at which point this function
- * becomes the thing that reads it rather than the thing that hard-codes it.
+ * design.md section 3 gives each band "a small weighted list", and the definition
+ * carries exactly that. **What is not built yet is the roll.** Weighted selection
+ * needs a source of randomness, and `sim/` is deliberately deterministic —
+ * `Math.random` appears in `game/feel/shake.ts` and `game/audio/synth.ts` and
+ * nowhere else — so it needs a seed on the fight state and is its own task, in
+ * the roadmap as open finding 3.
  *
- * The mapping is one to one and still worth writing down. `BandId` and
- * `FishAttackKind` are separate types precisely because they stop agreeing the
- * moment a fish has two attacks in one band, and this is the single place they
- * are allowed to meet.
+ * Until then a list of one is the only list this can answer, and it **throws** on
+ * anything longer rather than quietly returning the first entry. That is the
+ * whole point of the check: a second attack added to a band is a data change that
+ * would otherwise look like it worked, play like it did nothing, and take a
+ * playtest to notice.
  */
-export function attackForBand(band: BandId): FishAttackKind {
-  return band === 'close' ? 'close' : 'far';
-}
+export function attackForBand(fish: FishDefinition, band: BandId): string {
+  const { attacks } = bandById(fish, band);
 
-/** The depth the fish holds station at while it is in a given band. */
-export function restingDepth(band: BandId): number {
-  return band === 'close' ? FISH_CLOSE_BAND_DEPTH : FISH_FAR_BAND_DEPTH;
+  if (attacks.length !== 1) {
+    throw new Error(
+      `fish ${fish.id} band ${band} has ${attacks.length} attacks; weighted ` +
+        `selection is not built yet, so exactly one is the only supported list`,
+    );
+  }
+
+  return attacks[0].patternId;
 }
 
 /** Move `from` towards `to` by at most `step`, never overshooting it. */
@@ -60,48 +66,50 @@ type PositionFields = Pick<FishState, 'x' | 'depth'>;
  *
  * Takes only the fields it reads and returns a patch, the same convention as
  * `stepFishAttack` and `lineLength`, so `stepFight` can hand it the boat x it
- * has already resolved for this tick.
+ * has already resolved for this tick. The definition is one of those fields,
+ * since it is where the resting depth, the swim rate and the dive rate live.
  *
  * **Only while idle.** An attack in any of its three phases pins the fish where
  * it stands. design.md section 3's commitment rule is about not cancelling a
  * wind-up rather than about not moving during one, so this is a choice on top of
- * it, and it is made for two concrete reasons. The close punisher's telegraph is
- * drawn on the column of water above the fish, so a fish that drifted during its
- * own tell would drag the hitbox after the player and turn a read into a chase.
- * And the far punisher's flight time is derived from the depth it fired from, so
- * a fish that rose mid-wind-up would be shortening the warning it had already
- * started giving. design.md section 3's "rises while winding up something slow"
- * is a real thing to build, but it belongs to an attack designed around it
- * rather than bolted onto these two.
+ * it, and it is made for two concrete reasons. A melee column's telegraph is
+ * drawn on the water above the fish, so a fish that drifted during its own tell
+ * would drag the hitbox after the player and turn a read into a chase. And a
+ * volley's flight time is derived from the depth it fired from, so a fish that
+ * rose mid-wind-up would be shortening the warning it had already started giving.
+ * design.md section 3's "rises while winding up something slow" is a real thing
+ * to build, but it belongs to an attack designed around it rather than being
+ * bolted onto every attack at once.
  *
- * Depth is the intent. The fish rises to punish a boat that has closed and sinks
- * back once one has backed off, so being shallow is always something the player
- * did.
+ * Depth is the intent. The fish moves to the station its band names, so being
+ * shallow is always something the player did.
  *
- * Horizontally it closes on the boat in the close band and holds station in the
- * far band. Holding station is not laziness: the volley already reaches across
- * the whole lane, so a far-band fish has no reason to chase, and one that did
- * would eventually walk every fight into a wall. The approach exists because the
- * close band is much wider than the 60-unit hitbox at its centre, and without it
- * the fish would sit in the gap between the two with nothing it could do.
+ * Horizontally it closes on the boat in bands that say they approach and holds
+ * station in the ones that do not. Both are the fish's declaration rather than
+ * the engine's rule: a band whose attack already reaches across the lane has no
+ * reason to chase, and one that chased anyway would eventually walk every fight
+ * into a wall, while a band far wider than the hitbox at its centre needs the
+ * approach or the fish would sit in the gap with nothing it could do.
  *
  * Nothing clamps the fish to the lane and nothing needs to. It only ever moves
  * towards the boat's x and `towards` will not carry it past, and the boat is
  * already clamped, so the fish cannot be anywhere the boat could not be.
  */
 export function stepReposition(
-  fish: Pick<FishState, 'band' | 'attackPhase'> & PositionFields,
+  fish: Pick<FishState, 'band' | 'attackPhase' | 'definition'> & PositionFields,
   boatX: number,
 ): PositionFields {
   if (fish.attackPhase !== 'idle') {
     return { x: fish.x, depth: fish.depth };
   }
 
+  const { definition } = fish;
+  const band = bandById(definition, fish.band);
+
   return {
-    x:
-      fish.band === 'close'
-        ? towards(fish.x, boatX, FISH_SWIM_PER_TICK)
-        : fish.x,
-    depth: towards(fish.depth, restingDepth(fish.band), FISH_DIVE_PER_TICK),
+    x: band.approaches
+      ? towards(fish.x, boatX, definition.swimPerTick)
+      : fish.x,
+    depth: towards(fish.depth, band.restingDepth, definition.divePerTick),
   };
 }

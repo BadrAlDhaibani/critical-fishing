@@ -3,10 +3,12 @@ import { CueWatcher } from '../src/game/audio/cues.ts';
 import type { Impact } from '../src/game/feel/impacts.ts';
 import { createFightState } from '../src/sim/state.ts';
 import type { FightState } from '../src/sim/state.ts';
-import {
-  ATTACK_DAMAGE_MAX,
-  FISH_CLOSE_HULL_DAMAGE,
-} from '../src/data/config.ts';
+import { ATTACK_DAMAGE_MAX } from '../src/data/config.ts';
+import { GREY_BOX } from '../src/data/fish/greyBox.ts';
+import { patternById } from '../src/data/fish/types.ts';
+
+/** A representative heavy hit to feed the watcher, off the fish's own numbers. */
+const LUNGE = patternById(GREY_BOX, 'lunge');
 
 /**
  * The half of the audio layer that can be tested. Whether the bank sounds good
@@ -16,7 +18,7 @@ import {
  * indistinguishable from a sound you did not hear.
  */
 
-const HIT_BOAT: Impact = { target: 'boat', damage: FISH_CLOSE_HULL_DAMAGE };
+const HIT_BOAT: Impact = { target: 'boat', damage: LUNGE.hullDamage };
 const HIT_FISH: Impact = { target: 'fish', damage: ATTACK_DAMAGE_MAX };
 
 /** A state mid-wind-up, whichever attack it belongs to. */
@@ -81,14 +83,14 @@ describe('CueWatcher', () => {
     const close = new CueWatcher(state).sample(
       {
         ...windingUp(state),
-        fish: { ...windingUp(state).fish, attackKind: 'close' },
+        fish: { ...windingUp(state).fish, attackPatternId: 'lunge' },
       },
       [],
     );
     const far = new CueWatcher(state).sample(
       {
         ...windingUp(state),
-        fish: { ...windingUp(state).fish, attackKind: 'far' },
+        fish: { ...windingUp(state).fish, attackPatternId: 'volley' },
       },
       [],
     );

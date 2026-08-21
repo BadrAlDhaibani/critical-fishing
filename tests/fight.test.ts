@@ -5,7 +5,7 @@ import type { FightInputs, FightState } from '../src/sim/state.ts';
 import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
 import { basicAttackDamage } from '../src/sim/damage.ts';
 import { lineLength } from '../src/sim/distance.ts';
-import { CLOSE_PUNISHER_REACH } from '../src/sim/ai/patterns.ts';
+import { meleeReach } from '../src/sim/ai/patterns.ts';
 import {
   ATTACK_COOLDOWN_TICKS,
   ATTACK_LINE_COST,
@@ -16,27 +16,31 @@ import {
   DASH_LINE_COST,
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
-  FISH_CLOSE_ACTIVE_TICKS,
-  FISH_CLOSE_BAND_DEPTH,
-  FISH_CLOSE_COOLDOWN_TICKS,
-  FISH_CLOSE_HULL_DAMAGE,
-  FISH_CLOSE_RECOVERY_TICKS,
-  FISH_CLOSE_WINDUP_TICKS,
-  FISH_DIVE_PER_TICK,
-  FISH_FAR_ACTIVE_TICKS,
-  FISH_FAR_HULL_DAMAGE,
-  FISH_FAR_RISE_PER_TICK,
-  FISH_FAR_SHOT_COUNT,
-  FISH_FAR_WINDUP_TICKS,
-  FISH_RESISTANCE_MAX,
-  FISH_START_DEPTH,
-  FISH_SWIM_PER_TICK,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_SECOND,
   LINE_REGEN_PER_TICK,
   REEL_IN_TICKS,
 } from '../src/data/config.ts';
+import { GREY_BOX } from '../src/data/fish/greyBox.ts';
+import type { FishDefinition } from '../src/data/fish/types.ts';
+import {
+  activeTicksOf,
+  bandById,
+  meleePatternById,
+  volleyPatternById,
+} from '../src/data/fish/types.ts';
+
+// The fish the fight opens against, read off its definition rather than off
+// config, since task 3.1. What is left in the import above is the boat, the
+// arena and the player's own costs, which is exactly the split that task drew.
+const LUNGE = meleePatternById(GREY_BOX, 'lunge');
+const VOLLEY = volleyPatternById(GREY_BOX, 'volley');
+const VOLLEY_ACTIVE_TICKS = activeTicksOf(VOLLEY);
+const LUNGE_REACH = meleeReach(LUNGE);
+const CLOSE_BAND = bandById(GREY_BOX, 'close');
+/** The depth the fish opens a fight at, which is its outermost band's station. */
+const OPENING_DEPTH = createFightState().fish.depth;
 
 const LEFT: FightInputs = { ...noInputs(), moveLeft: true };
 const RIGHT: FightInputs = { ...noInputs(), moveRight: true };
@@ -116,7 +120,7 @@ describe('createFightState: opening resources', () => {
 
     expect(start.boat.hullMax).toBe(DEFAULT_HULL_MAX);
     expect(start.boat.lineMax).toBe(DEFAULT_LINE_MAX);
-    expect(start.fish.resistanceMax).toBe(FISH_RESISTANCE_MAX);
+    expect(start.fish.resistanceMax).toBe(GREY_BOX.resistance);
   });
 
   // Stamina below hull is deliberate, see decisions.md. Two bars on the same
@@ -126,6 +130,130 @@ describe('createFightState: opening resources', () => {
     const start = createFightState();
 
     expect(start.boat.lineMax).toBeLessThan(start.boat.hullMax);
+  });
+});
+
+/**
+ * The claim task 3.1 exists to make true, and the one task 3.3 will lean on:
+ * **a fish is data, and the engine reads it.**
+ *
+ * `DUMMY` below is a test fixture rather than a second fish for the game. Every
+ * number in it is deliberately unlike the grey box fish's, so a value that had
+ * quietly stayed hard-coded somewhere in the engine would show up here as the
+ * grey box fish's number appearing in a fight it is not in. It is written inline
+ * for the same reason: a real fish in `data/fish/` would be phase 3.3's work and
+ * would be tuned rather than chosen to be different.
+ */
+const DUMMY: FishDefinition = {
+  id: 'test-dummy',
+  name: 'Test Dummy',
+  rarity: 'common',
+  resistance: 120,
+  width: 40,
+  height: 8,
+  swimPerTick: GREY_BOX.swimPerTick / 2,
+  divePerTick: GREY_BOX.divePerTick,
+  bands: [
+    {
+      id: 'close',
+      maxDistance: 90,
+      restingDepth: 30,
+      approaches: true,
+      attacks: [{ patternId: 'nip', weight: 1 }],
+    },
+    {
+      id: 'far',
+      maxDistance: Infinity,
+      restingDepth: 60,
+      approaches: false,
+      attacks: [{ patternId: 'spit', weight: 1 }],
+    },
+  ],
+  patterns: [
+    {
+      id: 'nip',
+      behaviour: 'meleeColumn',
+      windUpTicks: 12,
+      activeTicks: 4,
+      recoveryTicks: 20,
+      cooldownTicks: 10,
+      hullDamage: 5,
+      hitboxWidth: 100,
+      punishes: 'close',
+    },
+    {
+      id: 'spit',
+      behaviour: 'volley',
+      windUpTicks: 9,
+      recoveryTicks: 10,
+      cooldownTicks: 30,
+      hullDamage: 3,
+      shotCount: 1,
+      shotIntervalTicks: 5,
+      shotWidth: 4,
+      risePerTick: 1,
+      trackPerTick: 0.1,
+      punishes: 'far',
+    },
+  ],
+};
+
+describe('a fight against a fish the engine has never seen', () => {
+  it('seeds every opening number off the definition', () => {
+    const start = createFightState(DUMMY);
+
+    expect(start.fish.definition).toBe(DUMMY);
+    expect(start.fish.resistance).toBe(DUMMY.resistance);
+    expect(start.fish.resistanceMax).toBe(DUMMY.resistance);
+    // The outermost band's station, not a constant and not the grey box fish's.
+    expect(start.fish.depth).toBe(60);
+    expect(start.fish.band).toBe('far');
+  });
+
+  it('carries the definition through a tick rather than dropping it', () => {
+    // `stepFight` rebuilds the fish from scratch every tick, so a field it
+    // forgets to name vanishes one tick into the fight. This is that trap for
+    // the one field the whole format hangs off.
+    const after = hold(createFightState(DUMMY), noInputs(), 30);
+
+    expect(after.fish.definition).toBe(DUMMY);
+  });
+
+  it('runs this fish’s attack, at this fish’s timings', () => {
+    const start = createFightState(DUMMY);
+    const winding = hold(start, noInputs(), 1);
+
+    expect(winding.fish.attackPatternId).toBe('spit');
+    expect(winding.fish.attackPhaseTicksRemaining).toBe(9);
+
+    // One tick to leave idle, the whole tell, then the first tick actually spent
+    // in the active phase, which is the one a shot leaves on.
+    //
+    // One shot rather than three, because this fish's volley says one. A shot
+    // count still coming from config would put three in the water here, and a
+    // one-shot volley is one tick long, so the phase is already recovering.
+    const firing = hold(start, noInputs(), 1 + 9 + 1);
+    expect(firing.fish.attackPhase).toBe('recovery');
+    expect(firing.projectiles).toHaveLength(1);
+    expect(firing.projectiles[0]?.patternId).toBe('spit');
+  });
+
+  it('uses this fish’s band edge and this fish’s hitbox', () => {
+    // Directly overhead, so the line is exactly the fish's depth: 60 units. That
+    // is inside the dummy's close band, whose edge is 90, and well inside its
+    // 100-wide box. Against the grey box fish, whose edge is 140 and whose box is
+    // 60, the same position is also close — but the dummy commits to *its* attack
+    // at *its* wind-up, and both numbers have to come off the definition to do it.
+    const start = createFightState(DUMMY);
+    const overhead = hold(
+      { ...start, boat: { ...start.boat, x: start.fish.x } },
+      noInputs(),
+      1,
+    );
+
+    expect(overhead.fish.band).toBe('close');
+    expect(overhead.fish.attackPatternId).toBe('nip');
+    expect(overhead.fish.attackPhaseTicksRemaining).toBe(12);
   });
 });
 
@@ -686,7 +814,7 @@ describe('stepFight: the pool refills', () => {
 
 describe('stepFight: the fish punishes standing close', () => {
   /** Long enough for the fish to wind up and swing once. */
-  const ONE_SWING = 1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS;
+  const ONE_SWING = 1 + LUNGE.windUpTicks + LUNGE.activeTicks;
 
   /** A fight with the boat parked directly above the fish. */
   function overhead(overrides: Partial<FightState['boat']> = {}): FightState {
@@ -700,17 +828,17 @@ describe('stepFight: the fish punishes standing close', () => {
   it('takes the hull damage the close punisher is worth', () => {
     const after = hold(overhead(), noInputs(), ONE_SWING);
 
-    expect(after.boat.hull).toBe(DEFAULT_HULL_MAX - FISH_CLOSE_HULL_DAMAGE);
+    expect(after.boat.hull).toBe(DEFAULT_HULL_MAX - LUNGE.hullDamage);
   });
 
   it('ends the boat in four swings', () => {
     // The whole point of pricing the damage against the hull. Four cycles plus
     // the tick that leaves idle, and there is nothing left.
     const cycle =
-      FISH_CLOSE_WINDUP_TICKS +
-      FISH_CLOSE_ACTIVE_TICKS +
-      FISH_CLOSE_RECOVERY_TICKS +
-      FISH_CLOSE_COOLDOWN_TICKS;
+      LUNGE.windUpTicks +
+      LUNGE.activeTicks +
+      LUNGE.recoveryTicks +
+      LUNGE.cooldownTicks;
     const after = hold(overhead(), noInputs(), 1 + 4 * cycle);
 
     expect(after.boat.hull).toBe(0);
@@ -731,14 +859,14 @@ describe('stepFight: the fish punishes standing close', () => {
   it('grants no invulnerability frames to a dash inside the hitbox', () => {
     // Winding up already, so the active frames land during the dash rather than
     // after it. The dash is towards the fish, so the boat cannot leave the box.
-    const winding = hold(overhead(), noInputs(), FISH_CLOSE_WINDUP_TICKS);
+    const winding = hold(overhead(), noInputs(), LUNGE.windUpTicks);
     expect(winding.fish.attackPhase).toBe('windUp');
 
     const dashed = hold(winding, DASH_LEFT, DASH_DURATION_TICKS - 1);
 
     // Still mid-dash when the hull was charged, which is the whole point.
     expect(dashed.boat.dashTicksRemaining).toBeGreaterThan(0);
-    expect(dashed.boat.hull).toBe(DEFAULT_HULL_MAX - FISH_CLOSE_HULL_DAMAGE);
+    expect(dashed.boat.hull).toBe(DEFAULT_HULL_MAX - LUNGE.hullDamage);
   });
 
   it('lets a boat that dashes clear of the box off entirely', () => {
@@ -751,7 +879,7 @@ describe('stepFight: the fish punishes standing close', () => {
     const after = hold(
       winding,
       DASH_LEFT,
-      FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
+      LUNGE.windUpTicks + LUNGE.activeTicks,
     );
 
     expect(after.fish.attackPhase).toBe('recovery');
@@ -765,26 +893,22 @@ describe('stepFight: the fish punishes standing close', () => {
     // exists, so a test asserting one would be asserting the bug.
     const after = hold(createFightState(), LEFT, 600);
 
-    expect(after.fish.attackKind).not.toBe('close');
+    expect(after.fish.attackPatternId).not.toBe('lunge');
   });
 });
 
 describe('stepFight: the fish punishes standing far', () => {
   /** Ticks from the fish's starting depth to the surface. */
-  const FLIGHT = Math.ceil(FISH_START_DEPTH / FISH_FAR_RISE_PER_TICK);
+  const FLIGHT = Math.ceil(OPENING_DEPTH / VOLLEY.risePerTick);
   /** One tick to leave idle, the tell, and the whole volley in the air. */
-  const ONE_VOLLEY = 1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS + FLIGHT;
+  const ONE_VOLLEY = 1 + VOLLEY.windUpTicks + VOLLEY_ACTIVE_TICKS + FLIGHT;
 
   // The boat opens the fight 100 units clear of the fish, which is outside the
   // close punisher's reach, so standing still is already standing far.
   it('answers a boat that does nothing with a volley', () => {
-    const after = hold(
-      createFightState(),
-      noInputs(),
-      1 + FISH_FAR_WINDUP_TICKS,
-    );
+    const after = hold(createFightState(), noInputs(), 1 + VOLLEY.windUpTicks);
 
-    expect(after.fish.attackKind).toBe('far');
+    expect(after.fish.attackPatternId).toBe('volley');
     expect(after.fish.attackPhase).toBe('active');
   });
 
@@ -792,9 +916,9 @@ describe('stepFight: the fish punishes standing far', () => {
     const firing = hold(
       createFightState(),
       noInputs(),
-      1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+      1 + VOLLEY.windUpTicks + VOLLEY_ACTIVE_TICKS,
     );
-    expect(firing.projectiles).toHaveLength(FISH_FAR_SHOT_COUNT);
+    expect(firing.projectiles).toHaveLength(VOLLEY.shotCount);
 
     // Long enough for the last of them to reach the surface. Nothing is left
     // behind: a shot that misses is gone, not parked at depth zero.
@@ -806,7 +930,7 @@ describe('stepFight: the fish punishes standing far', () => {
     const after = hold(createFightState(), noInputs(), ONE_VOLLEY);
 
     expect(after.boat.hull).toBe(
-      DEFAULT_HULL_MAX - FISH_FAR_SHOT_COUNT * FISH_FAR_HULL_DAMAGE,
+      DEFAULT_HULL_MAX - VOLLEY.shotCount * VOLLEY.hullDamage,
     );
   });
 
@@ -827,7 +951,7 @@ describe('stepFight: the fish punishes standing far', () => {
     const fired = hold(
       createFightState(),
       noInputs(),
-      1 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+      1 + VOLLEY.windUpTicks + VOLLEY_ACTIVE_TICKS,
     );
     const recovering = hold(fired, noInputs(), 1);
 
@@ -846,12 +970,14 @@ describe('stepFight: the fish punishes standing far', () => {
     const state: FightState = {
       ...start,
       boat: { ...start.boat, x: start.fish.x },
-      projectiles: [{ x: start.fish.x, depth: FISH_START_DEPTH, vx: 0 }],
+      projectiles: [
+        { x: start.fish.x, depth: OPENING_DEPTH, vx: 0, patternId: VOLLEY.id },
+      ],
     };
 
     const after = stepFight(state, noInputs());
 
-    expect(after.fish.attackKind).toBe('close');
+    expect(after.fish.attackPatternId).toBe('lunge');
     expect(after.projectiles).toHaveLength(1);
   });
 });
@@ -884,18 +1010,18 @@ describe('stepFight: the fish repositions', () => {
   // the player earned. This is the earning of it.
   it('rises when the boat closes in, and sinks again when it leaves', () => {
     const rise = Math.ceil(
-      (FISH_START_DEPTH - FISH_CLOSE_BAND_DEPTH) / FISH_DIVE_PER_TICK,
+      (OPENING_DEPTH - CLOSE_BAND.restingDepth) / GREY_BOX.divePerTick,
     );
     const closed = hold(quietFish(boatLeftOfFish(20)), noInputs(), rise);
 
     expect(closed.fish.band).toBe('close');
-    expect(closed.fish.depth).toBe(FISH_CLOSE_BAND_DEPTH);
+    expect(closed.fish.depth).toBe(CLOSE_BAND.restingDepth);
 
     // Straight back out to the far wall, far enough to clear the outer edge.
     const left = hold(closed, LEFT, 600);
 
     expect(left.fish.band).toBe('far');
-    expect(left.fish.depth).toBe(FISH_START_DEPTH);
+    expect(left.fish.depth).toBe(OPENING_DEPTH);
   });
 
   it('closes the gap in the close band and swings once it can reach', () => {
@@ -907,11 +1033,11 @@ describe('stepFight: the fish repositions', () => {
 
     expect(hold(start, noInputs(), 1).fish.band).toBe('close');
 
-    const ticks = Math.ceil((gap - CLOSE_PUNISHER_REACH) / FISH_SWIM_PER_TICK);
+    const ticks = Math.ceil((gap - LUNGE_REACH) / GREY_BOX.swimPerTick);
     const after = hold(start, noInputs(), ticks + 1);
 
     expect(after.fish.x).toBeLessThan(START.fish.x);
-    expect(after.fish.attackKind).toBe('close');
+    expect(after.fish.attackPatternId).toBe('lunge');
     expect(after.fish.attackPhase).toBe('windUp');
   });
 
@@ -921,11 +1047,7 @@ describe('stepFight: the fish repositions', () => {
     const winding = hold(boatLeftOfFish(20), noInputs(), 1);
     expect(winding.fish.attackPhase).toBe('windUp');
 
-    const swung = hold(
-      winding,
-      LEFT,
-      FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS,
-    );
+    const swung = hold(winding, LEFT, LUNGE.windUpTicks + LUNGE.activeTicks);
 
     expect(swung.fish.attackPhase).toBe('recovery');
     expect(swung.fish.x).toBe(winding.fish.x);
@@ -939,10 +1061,10 @@ describe('stepFight: the fish repositions', () => {
       const next = stepFight(state, tick % 2 === 0 ? LEFT : RIGHT);
 
       expect(Math.abs(next.fish.x - state.fish.x)).toBeLessThanOrEqual(
-        FISH_SWIM_PER_TICK,
+        GREY_BOX.swimPerTick,
       );
       expect(Math.abs(next.fish.depth - state.fish.depth)).toBeLessThanOrEqual(
-        FISH_DIVE_PER_TICK,
+        GREY_BOX.divePerTick,
       );
       state = next;
     }
@@ -998,7 +1120,7 @@ describe('stepFight: purity', () => {
       attackCooldownRemaining: NEVER - 1,
     });
     expect(after.fish.resistance).toBeLessThan(start.fish.resistance);
-    expect(start.fish.resistance).toBe(FISH_RESISTANCE_MAX);
+    expect(start.fish.resistance).toBe(GREY_BOX.resistance);
   });
 
   // The boat object is rebuilt every tick around the one field that changes,
@@ -1023,7 +1145,7 @@ describe('stepFight: purity', () => {
     const flying = hold(
       start,
       noInputs(),
-      2 + FISH_FAR_WINDUP_TICKS + FISH_FAR_ACTIVE_TICKS,
+      2 + VOLLEY.windUpTicks + VOLLEY_ACTIVE_TICKS,
     );
     const after = stepFight(flying, noInputs());
 
@@ -1084,7 +1206,7 @@ describe('boat movement through the fixed timestep', () => {
 
 describe('stepFight: ending the fight', () => {
   /** Long enough for the fish to wind up and land one close punisher. */
-  const ONE_SWING = 1 + FISH_CLOSE_WINDUP_TICKS + FISH_CLOSE_ACTIVE_TICKS;
+  const ONE_SWING = 1 + LUNGE.windUpTicks + LUNGE.activeTicks;
 
   /** Everything held down at once, to prove none of it is being read. */
   const EVERYTHING: FightInputs = { ...RIGHT, dash: true, attack: true };
@@ -1149,7 +1271,7 @@ describe('stepFight: ending the fight', () => {
     const start = createFightState();
     const mutual: FightState = {
       ...start,
-      boat: { ...start.boat, x: start.fish.x, hull: FISH_CLOSE_HULL_DAMAGE },
+      boat: { ...start.boat, x: start.fish.x, hull: LUNGE.hullDamage },
       fish: {
         ...start.fish,
         resistance: 1,
@@ -1157,8 +1279,8 @@ describe('stepFight: ending the fight', () => {
         // empty on the same tick and walking there would land them a tick apart.
         band: 'close',
         attackPhase: 'active',
-        attackKind: 'close',
-        attackPhaseTicksRemaining: FISH_CLOSE_ACTIVE_TICKS,
+        attackPatternId: 'lunge',
+        attackPhaseTicksRemaining: LUNGE.activeTicks,
       },
     };
 
@@ -1213,7 +1335,12 @@ describe('stepFight: ending the fight', () => {
       // winning tick and would certainly connect on the next one. Sixty ticks of
       // frozen fight later it must still be exactly where the win left it.
       projectiles: [
-        { x: start.boat.x, depth: 3 * FISH_FAR_RISE_PER_TICK, vx: 0 },
+        {
+          x: start.boat.x,
+          depth: 3 * VOLLEY.risePerTick,
+          vx: 0,
+          patternId: VOLLEY.id,
+        },
       ],
     };
 

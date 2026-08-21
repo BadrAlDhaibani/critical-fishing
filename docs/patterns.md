@@ -63,17 +63,23 @@ ticks because the question is "how many frames does the player have to read
 this", and routing that through a rate would only obscure it.
 
 Used by `BOAT_SPEED_PER_TICK`, `LINE_REGEN_PER_TICK`, `DASH_SPEED_PER_TICK`,
-`FISH_FAR_ACTIVE_TICKS`, the four fish per-tick rates, `CLOSE_PUNISHER_REACH` in
-`sim/ai/patterns.ts`, `CURVE_CONSTANT` in `sim/damage.ts`, and `GAME_PACE`'s
-`atPace` / `ticksAtPace`.
+`CURVE_CONSTANT` in `sim/damage.ts`, `GAME_PACE`'s `atPace` / `ticksAtPace` /
+`speedPerTick`, and in `data/fish/` both `activeTicksOf` (a volley's active
+duration, from its shot count and interval) and every fish rate, which is written
+`speedPerTick(42)` so the authored per-second number stays on the page.
 
 The corollary is that a derived value is **never** promoted to a tunable to make
-it easier to adjust. `CLOSE_PUNISHER_REACH` is half the hitbox plus half the
-hull; turning it into a third number would let it drift away from the box the
-renderer draws, and the drawing would become a lie.
+it easier to adjust. `meleeReach` in `sim/ai/patterns.ts` is half the pattern's
+hitbox plus half the hull; authoring it as a third number in the fish definition
+would let it drift away from the box the renderer draws at that same width, and
+the drawing would become a lie. Same for `shotReach` and a shot's width.
 
 Used in: `sim/distance.ts` (`lineLength`), `sim/ai/patterns.ts`
 (`stepFishAttack`, `stepProjectiles`), `sim/ai/bands.ts` (`stepReposition`)
+
+It is also why the fish definition rides on `FishState` rather than being a
+second parameter: `fish.definition` is one more name in an existing `Pick<>`,
+where threading it separately would have widened four signatures.
 
 ---
 

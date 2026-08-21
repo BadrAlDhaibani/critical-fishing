@@ -1075,3 +1075,131 @@ renderer change rather than a tuning one and would have been its own task.
 
 What remains of open finding 1 is now only phase 8.2's: no visual for the attack
 travelling the line.
+
+## 2026-08-21: The fish definition format, and where the fish/engine line falls
+
+Task 3.1. The shape below was proposed and all three open choices were answered
+by Badr before any code was written.
+
+**Behaviour is code, everything else is data.** A pattern carries a `behaviour`
+naming which of the engine's two attack shapes it runs — `meleeColumn` opens a
+hitbox on the water above the fish, `volley` throws shots that outlive the attack
+— and every number that shape uses is authored beside it. This is the load
+bearing part: a fish with two melee patterns at different reaches, damages and
+telegraphs is two entries in a data file and no engine change, which is what open
+finding 2 needs and what task 3.3 is the test of. A fish needing a genuinely new
+*shape* of attack is a new behaviour and a branch in `sim/ai/patterns.ts`, and
+architecture.md section 4 says to flag that rather than work around it.
+
+**Bands are an ordered array, nearest first.** `BandId` widened to
+`'close' | 'mid' | 'far'` and `bandFor` walks the list. Chosen over keeping two
+hard-typed bands, because architecture.md section 4 already sketches the array
+and because design.md section 3's "rare" rarity is three bands: hard-typing two
+would have made the first rare fish an engine edit. Each band states only where
+it *ends*, `Infinity` on the outermost. Rejected `minDistance` **and**
+`maxDistance` per the sketch: a boundary is one fact, and the previous band's end
+already is the next one's start.
+
+**Bands hold `attacks: [{ patternId, weight }]`, and nothing reads the weight
+yet.** design.md section 3 gives each band "a small weighted list" so the format
+carries one, but the roll needs a source of randomness inside a `sim/` that is
+deliberately deterministic, which is its own task (open finding 3).
+`attackForBand` therefore **throws** on a list longer than one entry rather than
+returning the first. Deliberate and the point of the decision: a second attack
+added to a band would otherwise look like it worked, play like it did nothing,
+and cost a playtest to notice. A test pins the throw.
+
+**`SHAKE_MAX_DAMAGE` is now a game constant authored at 25**, not the current
+fish's biggest hit. It used to be `FISH_CLOSE_HULL_DAMAGE`, which pinned the
+biggest shake to the biggest hit in a game that had one fish; once damage is
+per-fish that stops being a definition and becomes a choice. The choice is that
+the shake means the same thing across every fish — a minnow's chip hit reads as
+lighter than a boss's, which it cannot if each fish rescales the ceiling to its
+own worst attack. Rejected: a per-fish ceiling. `shake.ts` already clamps above
+it, so a future 40-damage hit simply maxes out. `tests/feel.test.ts` now *checks*
+that the grey box fish's lunge still lands exactly on the ceiling, where before
+that was true by construction.
+
+**The definition rides on `FishState`.** `fish.definition` is read-only and the
+one field that is the same object on every tick rather than a fresh one, which is
+safe because nothing in `sim/` mutates. Chosen over threading it as a second
+parameter through `stepFishAttack`, `stepReposition` and `bandFor`: everything
+that already takes a `Pick<FishState, ...>` just names one more field, and the
+"take a Pick of what you read, return a patch" pattern survives untouched. A
+projectile carries `patternId` for the same reason in miniature — a shot outlives
+the attack that fired it, so its climb rate, tracking cap, damage and width have
+to be findable again, and one string on the wire beats four numbers per shot.
+Phase 7 will broadcast the fish's id and look the definition up client-side
+rather than putting sixty numbers in every snapshot.
+
+**Where the line fell.** To the fish: resistance, body size, swim and dive rates,
+band edges, resting depths, whether a band approaches, and both patterns entire.
+To the engine: `FISH_BAND_HYSTERESIS`, because the fairness rule in design.md
+section 3 is a promise about every fish rather than a knob one fish turns;
+`FISH_START_X`, which is arena placement and becomes phase 4.1's; and the two
+presentation constants, renamed `TELEGRAPH_OUTLINE_PADDING` and
+`PROJECTILE_DRAW_HEIGHT` now that they belong to no particular fish. A shot's
+*width* went to the pattern rather than staying presentation, because the boat is
+hit-tested against it. `FISH_START_DEPTH` disappeared: it is the outermost band's
+resting depth and was the same fact twice.
+
+**No number changed.** Every value moved and none of them moved. The whole suite
+passes on its original assertions, which is the check that the extraction is a
+move rather than a retune.
+
+Also settled, smaller: the definition reaches the renderer, not only `sim/`.
+`telegraph.ts` and `projectiles.ts` read the fish's own size and the pattern's
+own widths, because a telegraph drawn at another fish's size is a promise the
+game cannot keep. `FightScene` sizes the fish rectangle from the definition at
+construction, which is correct while a restart reuses the same fish and gets
+revisited at phase 4.1.
+
+## 2026-08-21: Fish validation, and what a validation test is for
+
+Task 3.2. No design question was open here, so these are implementation calls
+made in the batch and worth not re-litigating.
+
+**The coverage rule is measured over reachable patterns, not over the `patterns`
+list.** architecture.md section 4 asks for "at least one pattern with
+`punishes: 'close'` and one with `punishes: 'far'`", and taken literally a fish
+could satisfy that with a pattern no band ever names — a safe camping spot with a
+passing test in front of it. `tests/fish.test.ts` therefore walks the bands'
+attack lists to find the patterns, and separately asserts no pattern is
+unreachable. design.md section 3's rule is about what the fish **does**.
+
+**`data/fish/index.ts` is the registry, and the test reads the directory to make
+sure it is complete.** Everything in the validation file loops over `ALL_FISH`,
+so a fish added as a file but not to the list would be validated by nothing while
+still being playable the moment an encounter table names it. Reading the
+directory turns "forgot to register it" into a failing test rather than a silent
+gap. The registry is deliberately **not** how `createFightState` finds its
+default fish, which still imports `greyBox.ts` directly: the default is a
+particular fish, not whichever one is first in a list.
+
+**`import.meta.glob` rather than `node:fs`.** Reading the directory with Node
+would have meant adding `@types/node` to the project for one test, and CLAUDE.md
+says not to add dependencies without asking. `vite/client` is already in the
+tsconfig `types`, and the glob lives in the test rather than in `src/`, so
+nothing that moves to the Colyseus server in phase 7 picks up a bundler
+dependency. Rejected: adding the types package, and dropping the check.
+
+**Six format rules ride along with the one the task asked for.** Unique fish ids,
+unique pattern ids within a fish, every band attack resolving to a real pattern,
+every band having at least one attack, bands ordered nearest first with an
+`Infinity` outermost edge, and every band being reachable by a boat overhead.
+Each is a fault task 3.3 could introduce in data alone, and each would otherwise
+surface either as a throw mid-fight or — worse — as a fish that plays wrong
+without failing anything. The last of those is the roadmap's invariant 1
+generalised: a station deeper than the next band in has room for means that band
+never fires, which is the no-safe-camping-spot rule broken from the fish's side.
+
+It overlaps one grey-box-specific test in `tests/bands.test.ts`, deliberately and
+without merging them. That file tests the tuned shape of *this* fight, alongside
+reasoning that is only about these numbers; this one tests that any fish is
+legal. The overlap is one assertion and the two ask different questions.
+
+**Every rule was proved to fail before the batch closed**, by putting a
+deliberately broken fish in `data/fish/`, watching each rule fire, and deleting
+it. Against a single well-formed fish most of these pass vacuously, which is the
+state the suite will be in most of the time, so a rule added here later should be
+checked the same way.

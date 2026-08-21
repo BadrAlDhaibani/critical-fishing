@@ -1,6 +1,21 @@
 /**
  * Tunable constants. Named values only, never inline literals at the call site.
  *
+ * **What belongs here and what does not.** Since task 3.1 a fish's own numbers
+ * live in `data/fish/`, one file per fish, and this file holds everything that is
+ * not any one fish's: the boat, the arena, the player's damage curve, the feel
+ * layer, and the presentation constants a telegraph is drawn with. The test to
+ * apply before adding a constant is whether **two different fish could disagree
+ * about it**. If they could, it is fish data and putting it here is what makes
+ * adding a fish need an engine edit, which architecture.md section 4 forbids.
+ *
+ * The line runs through some near neighbours, so a few are worth stating. A band
+ * edge is the fish's; the hysteresis margin around every edge is the game's. A
+ * shot's width is the pattern's, because the boat is measured against it; the
+ * height it is drawn at is the game's. Hull and stamina maxima are the *boat's*
+ * and are seeded onto the state from the default loadout at the bottom of this
+ * file, which is the same shape one step further out.
+ *
  * design.md section 6: the game renders at a fixed low internal resolution and
  * is scaled up with nearest-neighbour filtering. That internal resolution is
  * the coordinate space the entire simulation lives in. Boat speed, dash
@@ -47,15 +62,35 @@ export const INTERNAL_HEIGHT = 270;
  */
 export const GAME_PACE = 1.25;
 
-/** A speed in units per second, scaled by the global pace. */
-const atPace = (unitsPerSecond: number): number => unitsPerSecond * GAME_PACE;
+/**
+ * A speed in units per second, scaled by the global pace.
+ *
+ * Exported because the fish definitions in `data/fish/` are paced by the same
+ * knob as everything else, and pacing that only reached the constants in this
+ * file would leave every fish's speeds and telegraphs off the one clock.
+ */
+export const atPace = (unitsPerSecond: number): number =>
+  unitsPerSecond * GAME_PACE;
 
 /**
  * A duration in ticks, scaled by the global pace. Rounded, because a tick count
  * has to be whole: at 1.25 that costs the close punisher's wind-up a fifth of a
  * tick, which is the one place the dilation is not quite exact.
  */
-const ticksAtPace = (ticks: number): number => Math.round(ticks / GAME_PACE);
+export const ticksAtPace = (ticks: number): number =>
+  Math.round(ticks / GAME_PACE);
+
+/**
+ * A speed authored per second, paced, and handed back per tick.
+ *
+ * The two steps every speed in the game takes, in one call, so a fish definition
+ * can write `speedPerTick(42)` and keep the authored number visible the way
+ * `ticksAtPace(34)` does. The constants below spell the same thing out in two
+ * lines each because they export the per-second form as well; nothing outside
+ * `data/fish/` needs a fish's speed in anything but ticks.
+ */
+export const speedPerTick = (unitsPerSecond: number): number =>
+  atPace(unitsPerSecond) / TICK_HZ;
 
 /**
  * Y of the water surface, where the boat sits. Everything below is water.
@@ -162,9 +197,9 @@ export const ATTACK_COOLDOWN_TICKS = ticksAtPace(20);
  * Stamina regeneration. Chosen 2026-08-19, see decisions.md.
  *
  * 6 a second refills the whole pool in 13.3 seconds and one attack's cost in
- * 1.3. Worked backwards from the fish: 400 resistance split across attacking
- * and dashing lands the fight in the 60 to 90 seconds FISH_RESISTANCE_MAX was
- * sized for. Attacking flat out spends 24 a second, so a burst always has to be
+ * 1.3. Worked backwards from the fish: the grey box fish's 400 resistance split
+ * across attacking and dashing lands the fight in the 60 to 90 seconds that fish
+ * was sized for. Attacking flat out spends 24 a second, so a burst always has to be
  * paid off afterwards.
  *
  * The delay is the Dark Souls rule and is where most of the feel lives. Any
@@ -200,267 +235,46 @@ export const ATTACK_DAMAGE_MIN = 6;
 export const ATTACK_FULL_DAMAGE_RANGE = 100;
 
 /**
- * The fish's close punisher. Chosen 2026-08-19, see decisions.md.
+ * The hysteresis margin on every band edge, in line-length units.
  *
- * design.md section 3 requires every fish to have an attack that punishes being
- * close, because otherwise the best damage position is also the safest one and
- * the movement axis stops mattering. This is that attack, and until task 1.11
- * gives the fish distance bands it is the only thing it does.
+ * design.md section 3's second fairness rule, and an **engine** constant rather
+ * than a fish's: inside the margin the fish keeps whichever band it already had,
+ * so a player standing on a boundary cannot make it flicker between two
+ * movesets. That is a promise the game makes about every fish, not a knob one
+ * fish gets to turn.
  *
- * Durations are authored in ticks rather than per second and derived, unlike the
- * boat's speed and the refill rate. Telegraphs are reasoned about in frames: the
- * question being answered is "how many frames does the player have to read this
- * and move", and converting that through a rate would only obscure it.
- *
- * The wind-up is the telegraph and cannot be cancelled once it starts, which
- * design.md section 3 calls non-negotiable. The recovery is the player's reward
- * for reading it: 45 ticks is two attacks at the 20-tick cadence, or one attack
- * and a reposition.
- *
- * The wind-up was cut from 45 to 34 at the 1.13 tuning pass. Walking clear of
- * the hitbox takes 28 ticks, so the slack fell from 17 ticks to 6: the tell now
- * has to be read as it appears rather than at leisure, or the dash pays for it.
- * 28 is a hard floor, and a test pins it — below that the attack becomes
- * undodgeable on foot, which would make the dash mandatory rather than
- * insurance.
+ * Where the edges themselves are is fish data and lives in `data/fish/`. The
+ * consequence worth knowing before moving one: a band's usable width is
+ * `edge - HYSTERESIS`, not `edge`, so a resting depth deeper than that could
+ * never be pulled into the band inside it at all. A test pins that.
  */
-export const FISH_CLOSE_WINDUP_TICKS = ticksAtPace(34);
-export const FISH_CLOSE_ACTIVE_TICKS = ticksAtPace(8);
-export const FISH_CLOSE_RECOVERY_TICKS = ticksAtPace(45);
-
-/**
- * The gap between the end of one attack and the earliest start of the next.
- *
- * A stand-in for attack selection, which arrives with the distance bands at task
- * 1.11. A static fish with no bands still needs some rule for when to commit,
- * and a cooldown is the cheapest one that does not invent band edges early.
- *
- * Recovery plus cooldown is 85 ticks of safety after the hitbox clears, about
- * four attacks at the 20-tick cadence and 32 stamina, during which the refill
- * never runs because the 30-tick pause is restarted by every one of them. That
- * is the exchange the fight is built on: the safe window is also the window in
- * which the pool is being emptied. Full cycle is 127 ticks, about 2.1 seconds.
- *
- * Cut from 60 at the 1.13 tuning pass. The old 105-tick safe window was half of
- * why camping close worked: one dodge on foot bought nearly two seconds of free
- * damage from the highest-damage position in the fight.
- */
-export const FISH_CLOSE_COOLDOWN_TICKS = ticksAtPace(40);
-
-/**
- * What one landed close punisher takes off the hull.
- *
- * Priced against the default boat's 100, so four of them end a fight. A single
- * hit is a real setback rather than a scratch, which is the Souls flavour
- * design.md section 1 asks for, but one misread is survivable.
- */
-export const FISH_CLOSE_HULL_DAMAGE = 25;
-
-/**
- * How much of the lane above the fish the attack covers, centred on the fish.
- *
- * The hull is 24 wide, so the boat is clear of a 60-wide box at 42 units from
- * the fish's centre. One dash covers 55 and escapes with room; walking covers it
- * in 28 ticks, which since the 1.13 tuning pass fits inside the 34-tick wind-up
- * with only 6 ticks to spare. The dash is therefore insurance rather than the
- * only answer, which is what keeps it a decision, but walking out is now a
- * read made immediately rather than at leisure.
- *
- * Width is the only number here. The attack is tested horizontally against a
- * boat that is always on the surface, so the box has no meaningful height: what
- * it is drawn as covering vertically is the renderer's business.
- */
-export const FISH_CLOSE_HITBOX_WIDTH = 60;
-
-/**
- * The fish's far punisher, a slow tracking volley. Chosen 2026-08-20, see
- * decisions.md.
- *
- * The other half of design.md section 3's no-safe-camping-spot rule: without it
- * the best place to stand is across the lane, chipping away at the damage floor
- * in complete safety, and the movement axis only matters in one direction.
- *
- * design.md section 3 asks for it to be "trivially sidestepped up close, hard to
- * read from across the screen". Both halves of that are bought with the same two
- * numbers below: the shots rise slowly, so the warning is the wind-up plus the
- * whole flight, and they steer at well under walking pace, so a player who reads
- * the tell walks out of the way without spending anything.
- *
- * Durations in ticks, for the same reason the close punisher's are: a telegraph
- * is reasoned about in frames.
- */
-export const FISH_FAR_WINDUP_TICKS = ticksAtPace(40);
-export const FISH_FAR_RECOVERY_TICKS = ticksAtPace(30);
-
-/**
- * The volley. Three shots spaced far enough apart that one lazy sidestep does
- * not clear all of them, which is what makes it a volley rather than three
- * copies of the same dodge.
- *
- * The active duration is derived from the two: shots fire on the first tick and
- * every interval after it, so the phase lasts until the last one has left. A
- * fourth constant here could disagree with them.
- */
-export const FISH_FAR_SHOT_COUNT = 3;
-export const FISH_FAR_SHOT_INTERVAL_TICKS = ticksAtPace(15);
-export const FISH_FAR_ACTIVE_TICKS =
-  (FISH_FAR_SHOT_COUNT - 1) * FISH_FAR_SHOT_INTERVAL_TICKS + 1;
-
-/**
- * The gap after the volley before the fish may commit to anything again. Longer
- * than the close punisher's 40, because the shots are still in the air during
- * it: the fish being idle is not the same as the attack being over.
- */
-export const FISH_FAR_COOLDOWN_TICKS = ticksAtPace(90);
-
-/**
- * How fast a shot climbs towards the surface, and how fast it may drift
- * sideways chasing the boat.
- *
- * Authored per second with the per-tick values derived from TICK_HZ, same as the
- * boat's speed and the stamina refill.
- *
- * 96 a second is 1.6 units a tick, so from the fish's resting depth of 100 a
- * shot is in the air for about 63 ticks. With the 40-tick wind-up in front of it
- * that is about 1.7 seconds of warning, and it scales with depth for free: a
- * deep fish telegraphs further ahead and a shallow one gives barely any notice.
- * Raised from 72 at the 1.13 tuning pass, on "projectiles could be faster".
- *
- * 48 a second of tracking is 53% of the 90 the boat walks at. That inequality is
- * the whole design of the attack and a test pins it: walking always outruns the
- * correction, so the volley is answered by reading it rather than by spending a
- * dash, while a player who only shuffles gets followed.
- *
- * Tracking is a correction on top of the lob each shot is thrown with, not the
- * whole of its aim. A shot left alone lands where the boat was standing when it
- * was fired, from anywhere on the lane; the cap is how far it is allowed to
- * follow the player from there, about 50 units over a full flight. Tracking
- * alone could never cross the lane, and a volley that could not reach a boat
- * parked across it would leave exactly the safe camping spot design.md section 3
- * forbids.
- *
- * Both are pinned by tests, the tracking one as an inequality against the boat's
- * walking speed rather than as a value, so a retune during task 1.13 cannot
- * quietly turn the volley into something only a dash answers.
- */
-export const FISH_FAR_RISE_PER_SECOND = atPace(96);
-export const FISH_FAR_RISE_PER_TICK = FISH_FAR_RISE_PER_SECOND / TICK_HZ;
-export const FISH_FAR_TRACK_PER_SECOND = atPace(48);
-export const FISH_FAR_TRACK_PER_TICK = FISH_FAR_TRACK_PER_SECOND / TICK_HZ;
-
-/**
- * What one shot takes off the hull, and how wide it is.
- *
- * 8 against the default boat's 100, so a whole volley eaten is 24, about one
- * close punisher. Deliberately cheaper per hit than the close punisher's 25: a
- * single shot is a scratch that says "move", and it is only camping across the
- * lane and ignoring all of them that ends a fight.
- *
- * The hull is 24 wide against a 10-wide shot, so the boat is clear 17 units
- * away, which is 11 ticks of walking. Trivially sidestepped, exactly as
- * design.md section 3 asks, provided the tell was read.
- */
-export const FISH_FAR_HULL_DAMAGE = 8;
-export const FISH_FAR_SHOT_WIDTH = 10;
-/** Square, so a shot cannot be mistaken for a small boat or a small fish. */
-export const FISH_FAR_SHOT_HEIGHT = 10;
-
-/**
- * The distance bands. Chosen 2026-08-20, see decisions.md.
- *
- * design.md section 3: the fish reads the current distance, picks from that
- * band's attacks, and repositions if it wants a different band. Two bands, one
- * attack each, which is the "common" rarity in that section. The close band gets
- * the close punisher and the far band the volley.
- *
- * Measured on line length, which is euclidean and includes depth, not on
- * horizontal distance. That is what lets the fish's own depth move it between
- * bands, so rising and diving mean something beyond damage and telegraph length.
- *
- * The hysteresis is design.md section 3's second fairness rule: inside the
- * margin the fish keeps whichever band it already had, so a player standing on
- * the boundary cannot make it flicker between two movesets.
- *
- * In units the fight is actually played in: against a fish resting at
- * FISH_FAR_BAND_DEPTH, the close band starts about 75 horizontal away, and
- * against one risen to FISH_CLOSE_BAND_DEPTH it does not end until about 147.
- * That asymmetry is not a mistake. Rising shortens the line by itself, so a fish
- * that has committed to being close is harder to shake off than it was to draw
- * in, which is what makes closing a decision rather than a toggle.
- */
-export const FISH_BAND_EDGE = 140;
 export const FISH_BAND_HYSTERESIS = 15;
 
 /**
- * Where the fish wants to sit in each band. It rises to punish a boat that has
- * closed and sinks back once one has backed off.
+ * How tall a shot is drawn. Presentation, not a hit test.
  *
- * The intent design.md section 3 asks for, and the only depth script the grey
- * box fish has: "the fish is shallow right now" reads as an earned window
- * because closing in is what earned it.
- *
- * Both are levers the fish already had, now pointed at something. Depth is a leg
- * of line length, so rising to 50 hands the player full damage for as long as
- * they are willing to stand in the hitbox, and it is the divisor in
- * `shotFlightTicks`, so a shallow fish's volley gives half the warning a resting
- * one's does. Neither needed a new number.
- *
- * FISH_FAR_BAND_DEPTH is the depth the fish already starts a fight at, so the
- * opening position is its resting station rather than somewhere it immediately
- * drifts away from.
- *
- * It must stay at or under FISH_BAND_EDGE - FISH_BAND_HYSTERESIS, and a test
- * pins that. A boat directly above the fish is exactly `depth` away, so a fish
- * resting deeper than the edge could never be pulled into the close band at all:
- * it would dive out of reach for the whole fight and the close punisher would
- * never fire. That is design.md section 3's no-safe-camping-spot rule broken
- * from the fish's side of it.
+ * A shot's *width* belongs to the pattern that fired it, because it is what the
+ * boat is measured against and what makes the drawn rectangle honest. Its height
+ * is nobody's: the attack is tested horizontally against a boat that is always on
+ * the surface, so this only has to stop a shot being mistaken for a small boat or
+ * a small fish. Square against the grey box fish's 10-wide shot, which is where
+ * the number came from.
  */
-export const FISH_CLOSE_BAND_DEPTH = 50;
-export const FISH_FAR_BAND_DEPTH = 100;
+export const PROJECTILE_DRAW_HEIGHT = 10;
 
 /**
- * How fast the fish repositions, horizontally and vertically.
+ * How far outside the fish an on-the-body tell is drawn.
  *
- * Authored per second with the per-tick values derived from TICK_HZ, same as the
- * boat's speed, the stamina refill and the shots' climb.
- *
- * 42 a second is 47% of the 90 the boat walks at, and a test pins that
- * inequality rather than the value. Walking always breaks contact, so a fish
- * gliding towards you is pressure rather than a trap, and the dash is still
- * insurance rather than the only way out. It closes about 28 units over a
- * close-punisher cooldown, most of the way from the edge of the hitbox to
- * underneath you.
- *
- * **The pinned inequality is necessary but not sufficient, and this number is
- * capped well below it.** Being slower than the boat only guarantees breaking
- * contact in an unbounded lane; the lane is 480 units and the boat is clamped to
- * it. A boat that starts directly above the fish and runs has about 205 ticks
- * before it hits a wall, and it needs the gap to reach ~147 units for the band
- * to flip back to far. That caps the swim speed near 47 whatever the pinned
- * inequality says, and 42 is chosen to keep about 20 ticks of margin. Raised
- * from 36 at the 1.13 tuning pass; 54 was tried first and let the fish corner a
- * fleeing boat against the wall permanently, which is the trap decisions.md
- * rules out.
- *
- * 30 a second of rise and dive takes the fish between its two resting depths in
- * about 1.7 seconds, a little under one attack cycle, so it arrives at the depth
- * its band wants at roughly the moment it is ready to attack from there.
- */
-export const FISH_SWIM_PER_SECOND = atPace(42);
-export const FISH_SWIM_PER_TICK = FISH_SWIM_PER_SECOND / TICK_HZ;
-export const FISH_DIVE_PER_SECOND = atPace(30);
-export const FISH_DIVE_PER_TICK = FISH_DIVE_PER_SECOND / TICK_HZ;
-
-/**
- * How far outside the fish its far-punisher tell is drawn.
- *
- * The close punisher owns a column of water and is telegraphed on it. The far
- * punisher owns nothing until the shots exist, so its tell goes on the fish, and
+ * A column attack owns a stretch of water and is telegraphed on it. An attack
+ * that owns no water until its shots exist puts its tell on the fish instead, and
  * it has to be a plainly different shape from the column rather than a variation
  * on it: the two reads ask for opposite movements.
+ *
+ * Presentation, so it stays here rather than going per-fish. It is measured
+ * outwards from whatever size the fish is, so it already fits every fish without
+ * being restated by each one.
  */
-export const FISH_FAR_TELL_PADDING = 4;
+export const TELEGRAPH_OUTLINE_PADDING = 4;
 
 /**
  * The reel-in. Chosen 2026-08-20, see decisions.md.
@@ -571,9 +385,15 @@ export const COLOUR_TELEGRAPH = 0xe07a3c;
  * floor is untouched by this** — it was already on SHAKE_MIN_AMPLITUDE for four
  * frames and still is, which is what keeps the consistency that retune bought.
  *
- * SHAKE_MAX_DAMAGE is the close punisher's hull damage rather than a number of
- * its own, so the biggest shake in the game is pinned to the biggest hit in the
- * game and the two cannot come apart.
+ * SHAKE_MAX_DAMAGE is the hit the whole scale is calibrated to, and it is a game
+ * constant rather than the current fish's biggest hit. Until task 3.1 it was
+ * `FISH_CLOSE_HULL_DAMAGE`, which pinned the biggest shake to the biggest hit in
+ * a game that only had one fish. Once damage is per-fish that stops being a
+ * definition and becomes a choice, and the choice made at 3.1 is that **the shake
+ * means the same thing across every fish**: a minnow's chip hit has to read as
+ * lighter than a boss's, which it cannot if each fish rescales the ceiling to its
+ * own worst attack. 25 is the number it already was. A future fish hitting for 40
+ * simply maxes it out, because `shake.ts` clamps above the ceiling.
  *
  * **Deliberately not paced.** Like every other feel number and unlike every
  * gameplay duration above, this is not wrapped in `ticksAtPace`. Shake is
@@ -584,7 +404,7 @@ export const COLOUR_TELEGRAPH = 0xe07a3c;
 export const SHAKE_MAX_AMPLITUDE = 2;
 export const SHAKE_MIN_AMPLITUDE = 1;
 export const SHAKE_MAX_FRAMES = 8;
-export const SHAKE_MAX_DAMAGE = FISH_CLOSE_HULL_DAMAGE;
+export const SHAKE_MAX_DAMAGE = 25;
 export const SHAKE_DECAY_PER_FRAME = SHAKE_MAX_AMPLITUDE / SHAKE_MAX_FRAMES;
 
 /**
@@ -707,26 +527,24 @@ export const BOAT_HEIGHT = 10;
 /** Boat starts centred, so neither wall is nearer at the opening of a fight. */
 export const BOAT_START_X = INTERNAL_WIDTH / 2;
 
-/** Fish size. Wider than tall, so it reads as a fish and not as a second boat. */
-export const FISH_WIDTH = 20;
-export const FISH_HEIGHT = 12;
-
 /**
- * Where the fish opens a fight. The AI owns both from task 1.11 onwards.
+ * Where in the lane a fight opens with the fish. The AI owns its position from
+ * tick one onwards; this is only where it is put.
  *
- * Depth counts down from the waterline, so 100 draws at y 170 and the boat is
- * implicitly at depth 0. Chosen 2026-08-19, see decisions.md: 100 units right of
- * the boat's start opens the fight on a diagonal line rather than a vertical
- * one, and mid-water leaves room either side for the fish to rise and dive.
+ * Arena placement rather than fish data, which is why it survived task 3.1 in
+ * here. Any fish hooked in this spot opens the fight from it, and phase 4.1's
+ * encounter roll is what will eventually decide it per cast.
  *
- * The depth is FISH_FAR_BAND_DEPTH rather than a number of its own, because it
- * is the same fact twice: the fish opens the fight at its resting station in the
- * band it opens in, so nothing drifts on tick one. The opening line is 141
- * units, which sits inside the hysteresis margin, so the opening band is seeded
- * in `createFightState` rather than worked out from the geometry.
+ * Chosen 2026-08-19, see decisions.md: 100 units right of the boat's start opens
+ * the fight on a diagonal line rather than a vertical one.
+ *
+ * There is no matching start depth. The fish opens at its outermost band's
+ * resting station, so that number is the fish's and `createFightState` reads it
+ * off the definition. Against the grey box fish the opening line is 141 units,
+ * which sits inside the hysteresis margin, so the opening band has to be seeded
+ * rather than worked out from the geometry.
  */
 export const FISH_START_X = 340;
-export const FISH_START_DEPTH = FISH_FAR_BAND_DEPTH;
 
 /**
  * The default loadout. Chosen 2026-08-19, see decisions.md.
@@ -748,22 +566,6 @@ export const FISH_START_DEPTH = FISH_FAR_BAND_DEPTH;
  */
 export const DEFAULT_HULL_MAX = 100;
 export const DEFAULT_LINE_MAX = 80;
-
-/**
- * The grey box fish's health. Chosen 2026-08-19, see decisions.md.
- *
- * Sized for roughly a 60 to 90 second fight once the basic attack lands at task
- * 1.7, which is long enough for the fish to cycle its moveset several times.
- * Like FISH_START_X and FISH_START_DEPTH above, this belongs to one fish and
- * moves into a fish definition file at task 3.1.
- *
- * Deliberately **not** paced at the 1.13 tuning pass, and deliberately not
- * raised to compensate for pacing either. Attacks come 25% more often at
- * GAME_PACE 1.25 while this stays at 400, so the fight now runs about 48 to 72
- * seconds. Chosen over holding the original 60 to 90: a longer fast fight reads
- * as padded, and a shorter one suits a phase that is played twenty times over.
- */
-export const FISH_RESISTANCE_MAX = 400;
 
 /**
  * Bar geometry, in internal-resolution units.

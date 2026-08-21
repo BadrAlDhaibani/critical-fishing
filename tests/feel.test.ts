@@ -6,14 +6,21 @@ import { createFightState } from '../src/sim/state.ts';
 import { TICK_MS } from '../src/sim/loop.ts';
 import {
   ATTACK_DAMAGE_MAX,
-  FISH_CLOSE_HULL_DAMAGE,
-  FISH_FAR_HULL_DAMAGE,
   SHAKE_MAX_AMPLITUDE,
   SHAKE_MAX_DAMAGE,
   SHAKE_MAX_FRAMES,
   SHAKE_MIN_AMPLITUDE,
   HIT_FLASH_FRAMES,
 } from '../src/data/config.ts';
+import { GREY_BOX } from '../src/data/fish/greyBox.ts';
+import { patternById } from '../src/data/fish/types.ts';
+
+// The two ends of the damage range a real fight produces, read off the fish
+// rather than off config since task 3.1. The shake's own ceiling is a game
+// constant and stays in the import above: what the tests below check is that the
+// grey box fish's biggest hit still lands on it.
+const LUNGE = patternById(GREY_BOX, 'lunge');
+const VOLLEY = patternById(GREY_BOX, 'volley');
 
 /**
  * architecture.md section 9 says feel is validated by playtest rather than by
@@ -32,13 +39,11 @@ const alwaysMin = (): number => 0;
 
 describe('amplitudeForDamage', () => {
   it('puts a far punisher shot on the floor', () => {
-    expect(amplitudeForDamage(FISH_FAR_HULL_DAMAGE)).toBe(SHAKE_MIN_AMPLITUDE);
+    expect(amplitudeForDamage(VOLLEY.hullDamage)).toBe(SHAKE_MIN_AMPLITUDE);
   });
 
   it('puts a close punisher on the ceiling', () => {
-    expect(amplitudeForDamage(FISH_CLOSE_HULL_DAMAGE)).toBe(
-      SHAKE_MAX_AMPLITUDE,
-    );
+    expect(amplitudeForDamage(LUNGE.hullDamage)).toBe(SHAKE_MAX_AMPLITUDE);
   });
 
   it('puts the players best hit between the two', () => {
@@ -66,7 +71,7 @@ describe('Shake', () => {
     // silently: a fractional scroll at a 4x nearest-neighbour zoom puts every
     // edge between physical pixels and shimmers as things move.
     const shake = new Shake(() => Math.random());
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     for (let i = 0; i < SHAKE_MAX_FRAMES; i++) {
       const { x, y } = shake.update(TICK_MS);
@@ -78,7 +83,7 @@ describe('Shake', () => {
 
   it('never throws the frame further than the amplitude', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     for (let i = 0; i < SHAKE_MAX_FRAMES; i++) {
       const { x, y } = shake.update(TICK_MS);
@@ -94,7 +99,7 @@ describe('Shake', () => {
     // zero, so hits from across the lane shook only sometimes while close-range
     // ones were solid. SHAKE_MIN_AMPLITUDE exists to stop exactly that.
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_FAR_HULL_DAMAGE);
+    shake.trigger(VOLLEY.hullDamage);
 
     let frames = 0;
     while (shake.current > 0) {
@@ -113,7 +118,7 @@ describe('Shake', () => {
     // before any of it reached the screen, which the heaviest hits absorbed and
     // the lightest could not.
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     expect(shake.update(TICK_MS).x).toBe(SHAKE_MAX_AMPLITUDE);
   });
@@ -123,10 +128,10 @@ describe('Shake', () => {
     // every offset down and left, which over twelve frames reads as the screen
     // sliding off rather than shaking.
     const positive = new Shake(alwaysMax);
-    positive.trigger(FISH_CLOSE_HULL_DAMAGE);
+    positive.trigger(LUNGE.hullDamage);
 
     const negative = new Shake(alwaysMin);
-    negative.trigger(FISH_CLOSE_HULL_DAMAGE);
+    negative.trigger(LUNGE.hullDamage);
 
     expect(positive.update(TICK_MS).x).toBeGreaterThan(0);
     expect(negative.update(TICK_MS).x).toBeLessThan(0);
@@ -134,7 +139,7 @@ describe('Shake', () => {
 
   it('decays to a dead stop and stays there', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     for (let i = 0; i < SHAKE_MAX_FRAMES; i++) {
       shake.update(TICK_MS);
@@ -146,7 +151,7 @@ describe('Shake', () => {
 
   it('runs the heaviest hit for about its full length', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     let movingFrames = 0;
     for (let i = 0; i < SHAKE_MAX_FRAMES * 2; i++) {
@@ -162,10 +167,10 @@ describe('Shake', () => {
 
   it('fades a light hit sooner than a heavy one', () => {
     const light = new Shake(alwaysMax);
-    light.trigger(FISH_FAR_HULL_DAMAGE);
+    light.trigger(VOLLEY.hullDamage);
 
     const heavy = new Shake(alwaysMax);
-    heavy.trigger(FISH_CLOSE_HULL_DAMAGE);
+    heavy.trigger(LUNGE.hullDamage);
 
     for (let i = 0; i < SHAKE_MAX_FRAMES / 2; i++) {
       light.update(TICK_MS);
@@ -180,26 +185,26 @@ describe('Shake', () => {
     // Trading blows lands both in one tick. Stacking would turn a jolt into a
     // lurch, which reads as the game glitching rather than as weight.
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
-    shake.trigger(FISH_FAR_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
+    shake.trigger(VOLLEY.hullDamage);
 
     expect(shake.current).toBe(SHAKE_MAX_AMPLITUDE);
   });
 
   it('is not cut short by a light hit landing mid-shake', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
     shake.update(TICK_MS);
     const before = shake.current;
 
-    shake.trigger(FISH_FAR_HULL_DAMAGE);
+    shake.trigger(VOLLEY.hullDamage);
 
     expect(shake.current).toBe(before);
   });
 
   it('stops dead on reset, so a restart opens still', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
     shake.reset();
 
     expect(shake.update(TICK_MS)).toEqual({ x: 0, y: 0 });
@@ -207,7 +212,7 @@ describe('Shake', () => {
 
   it('survives the multi-second delta a backgrounded tab hands out', () => {
     const shake = new Shake(alwaysMax);
-    shake.trigger(FISH_CLOSE_HULL_DAMAGE);
+    shake.trigger(LUNGE.hullDamage);
 
     // That frame is still drawn and still shakes, since the hit did land. What
     // the clamp guarantees is that the whole shake is spent by the end of it.
@@ -302,11 +307,11 @@ describe('ImpactWatcher', () => {
 
     const hit = {
       ...state,
-      boat: { ...state.boat, hull: state.boat.hull - FISH_CLOSE_HULL_DAMAGE },
+      boat: { ...state.boat, hull: state.boat.hull - LUNGE.hullDamage },
     };
 
     expect(watcher.sample(hit)).toEqual([
-      { target: 'boat', damage: FISH_CLOSE_HULL_DAMAGE },
+      { target: 'boat', damage: LUNGE.hullDamage },
     ]);
   });
 
@@ -333,7 +338,7 @@ describe('ImpactWatcher', () => {
 
     const traded = {
       ...state,
-      boat: { ...state.boat, hull: state.boat.hull - FISH_CLOSE_HULL_DAMAGE },
+      boat: { ...state.boat, hull: state.boat.hull - LUNGE.hullDamage },
       fish: {
         ...state.fish,
         resistance: state.fish.resistance - ATTACK_DAMAGE_MAX,
@@ -341,7 +346,7 @@ describe('ImpactWatcher', () => {
     };
 
     expect(watcher.sample(traded)).toEqual([
-      { target: 'boat', damage: FISH_CLOSE_HULL_DAMAGE },
+      { target: 'boat', damage: LUNGE.hullDamage },
       { target: 'fish', damage: ATTACK_DAMAGE_MAX },
     ]);
   });
@@ -352,7 +357,7 @@ describe('ImpactWatcher', () => {
 
     const hit = {
       ...state,
-      boat: { ...state.boat, hull: state.boat.hull - FISH_CLOSE_HULL_DAMAGE },
+      boat: { ...state.boat, hull: state.boat.hull - LUNGE.hullDamage },
     };
     watcher.sample(hit);
 
@@ -370,12 +375,12 @@ describe('ImpactWatcher', () => {
       ...state,
       boat: {
         ...state.boat,
-        hull: state.boat.hull - FISH_FAR_HULL_DAMAGE * 3,
+        hull: state.boat.hull - VOLLEY.hullDamage * 3,
       },
     };
 
     expect(watcher.sample(hit)).toEqual([
-      { target: 'boat', damage: FISH_FAR_HULL_DAMAGE * 3 },
+      { target: 'boat', damage: VOLLEY.hullDamage * 3 },
     ]);
   });
 
