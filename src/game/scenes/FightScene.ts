@@ -45,6 +45,8 @@ import { Projectiles } from '../render/projectiles.ts';
 import { Shake } from '../feel/shake.ts';
 import { Flash } from '../feel/flash.ts';
 import { ImpactWatcher } from '../feel/impacts.ts';
+import { CueWatcher, type FightAudioPlayer } from '../audio/cues.ts';
+import { createFightAudio } from '../audio/synth.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -87,6 +89,15 @@ export class FightScene extends Phaser.Scene {
   private readonly boatFlash = new Flash();
   private readonly fishFlash = new Flash();
 
+  /**
+   * The audio layer, split the same way the effects are: `cues` decides what
+   * should be heard and `audio` makes the noise. The player is built once in
+   * `create`, because it owns a gain node on Phaser's audio graph and a fresh one
+   * per fight would leak one per restart.
+   */
+  private audio!: FightAudioPlayer;
+  private cues!: CueWatcher;
+
   private overlay!: DebugOverlay;
   private elapsedMs = 0;
 
@@ -127,6 +138,9 @@ export class FightScene extends Phaser.Scene {
       .setOrigin(0, 0);
 
     this.controls = createFightControls(this);
+
+    // Before `startFight`, which seeds the cue watcher off the first state.
+    this.audio = createFightAudio(this);
 
     this.startFight();
     const initialState = this.driver.current;
@@ -227,6 +241,12 @@ export class FightScene extends Phaser.Scene {
     // fight's numbers.
     this.impacts = new ImpactWatcher(this.driver.current);
 
+    // Rebuilt for the same reason, and it matters more here: the watcher holds
+    // the last stage it saw. Left alone across a restart it would be holding
+    // `escaped` while the new fight is `fighting`, and the next loss would be
+    // silent because the stage never appeared to change.
+    this.cues = new CueWatcher(this.driver.current);
+
     // A shake or a flash still running from the killing blow of the last fight
     // must not open the next one moving or lit. Restarting is an instant cut,
     // the same as the ending wash it is dismissing.
@@ -268,7 +288,9 @@ export class FightScene extends Phaser.Scene {
     // been carried for since 2.2. The shake says how hard and the flash says
     // which of the two it happened to, so one screen-wide effect and one local
     // one split the reading between them rather than both saying the same thing.
-    for (const impact of this.impacts.sample(this.driver.current)) {
+    const impacts = this.impacts.sample(this.driver.current);
+
+    for (const impact of impacts) {
       this.shake.trigger(impact.damage);
 
       if (impact.target === 'boat') {
@@ -276,6 +298,14 @@ export class FightScene extends Phaser.Scene {
       } else {
         this.fishFlash.trigger();
       }
+    }
+
+    // The same impacts again rather than a second reading of the state, so the
+    // ear and the eye can never disagree about what just happened. The watcher
+    // adds only what damage cannot show: the fish committing to an attack, and
+    // the fight being lost.
+    for (const cue of this.cues.sample(this.driver.current, impacts)) {
+      this.audio.play(cue);
     }
 
     // Moving the camera rather than the objects, so everything drawn moves

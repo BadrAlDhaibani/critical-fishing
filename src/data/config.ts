@@ -612,6 +612,92 @@ export const SHAKE_DECAY_PER_FRAME = SHAKE_MAX_AMPLITUDE / SHAKE_MAX_FRAMES;
 export const COLOUR_HIT_FLASH = 0xffffff;
 export const HIT_FLASH_FRAMES = 2;
 
+/**
+ * The grey box sound bank. Chosen 2026-08-20, see decisions.md.
+ *
+ * design.md section 6 asks for three or four core sounds. These are synthesised
+ * from oscillators at run time rather than loaded from files, which is the same
+ * bet the coloured rectangles are: no assets to make before the thing can be
+ * judged, every value a number that can be argued about, and nothing to re-export
+ * when one of them is wrong. **Explicitly placeholder.** Real audio replaces the
+ * player behind `FightAudioPlayer`, not this table.
+ *
+ * Read as: slide from `fromHz` to `toHz` over `ms`, at `gain`, on `wave`. A flat
+ * sound sets both frequencies the same. `noise` mixes in a burst of white noise,
+ * which is what stops a percussive hit reading as a musical note.
+ *
+ * The four are pitched to stay apart from each other, because they routinely
+ * overlap: the boat can be hit while a wind-up starts and a shot is landing.
+ * High and short for the player's own hit, low and blunt for taking one, a
+ * mid-range rise for the warning, and a long fall for the loss — the only one
+ * long enough to be a statement rather than a tick.
+ *
+ * **Not paced**, like every other feel number: wall-clock, nothing in the
+ * simulation timed against it, and no inequality involves it.
+ *
+ * Numbers picked rather than asked for, deliberately and unusually. A frequency
+ * cannot be judged without hearing it, so these are a first cut for task 2.5,
+ * the feel tuning pass, to argue with.
+ */
+export interface SoundDefinition {
+  fromHz: number;
+  toHz: number;
+  ms: number;
+  gain: number;
+  wave: OscillatorType;
+  noise: number;
+}
+
+/** Your hit landing. Short and bright, because it fires most often. */
+export const SOUND_ATTACK: SoundDefinition = {
+  fromHz: 660,
+  toHz: 440,
+  ms: 70,
+  gain: 0.18,
+  wave: 'square',
+  noise: 0.25,
+};
+
+/** The boat taking one. Low, blunt and mostly noise, so it reads as a thud. */
+export const SOUND_HURT: SoundDefinition = {
+  fromHz: 180,
+  toHz: 70,
+  ms: 200,
+  gain: 0.3,
+  wave: 'triangle',
+  noise: 0.6,
+};
+
+/**
+ * The fish committing to an attack. The only cue that is a warning rather than a
+ * report, so it rises where the others fall, and it is the one sound worth
+ * hearing over everything else.
+ */
+export const SOUND_TELEGRAPH: SoundDefinition = {
+  fromHz: 300,
+  toHz: 520,
+  ms: 180,
+  gain: 0.22,
+  wave: 'sawtooth',
+  noise: 0,
+};
+
+/** The fight lost. Long, and the only one that is allowed to be. */
+export const SOUND_LOSS: SoundDefinition = {
+  fromHz: 320,
+  toHz: 60,
+  ms: 900,
+  gain: 0.32,
+  wave: 'triangle',
+  noise: 0.1,
+};
+
+/**
+ * A master level over all of the above, so the whole bank moves with one number
+ * at the 2.5 tuning pass rather than four.
+ */
+export const SOUND_MASTER_GAIN = 0.6;
+
 /** Hull size. Grey box proportions, replaced by the phase 8 art pass. */
 export const BOAT_WIDTH = 24;
 export const BOAT_HEIGHT = 10;

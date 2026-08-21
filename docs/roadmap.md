@@ -13,15 +13,17 @@ genuinely need more mid-task.
 Update this block at the end of every batch. Keep it to a few lines.
 
 - **Current phase:** 2, game feel, still rectangles.
-- **Last completed task:** 2.3, hit flash. **2.1 was built and cut**, see the
+- **Last completed task:** 2.4, core sounds. **2.1 was built and cut**, see the
   phase 2 list below and decisions.md. Phase 1 is complete apart from 1.2c, still
   open and still not gameplay-blocking.
-- **Next task:** 2.4, core sounds. _Context: design.md section 6._ **The first
-  task in the project that needs assets**, and the project has no audio pipeline,
-  no sound files and no decision about where they come from. Settle that with
-  Badr before writing anything, and remember CLAUDE.md forbids adding
-  dependencies without asking — Phaser's own sound manager needs none, but
-  anything else does.
+- **Next task:** 2.5, the feel tuning pass, which closes phase 2. _Context:
+  design.md section 6._ It is a tuning pass over everything 2.2 to 2.4 built, so
+  the numbers to argue about are `SHAKE_*`, `HIT_FLASH_FRAMES` and the four
+  `SOUND_*` rows plus `SOUND_MASTER_GAIN`, all in `data/config.ts`. Two things
+  already queued for it: the audio bank's frequencies were **picked rather than
+  asked for**, since a frequency cannot be judged without hearing it, and open
+  finding 1 below leaves "a refused attack is silent" as a real gap that was
+  never actually decided.
 - **Phase 1 exited without its twenty-fight exit test.** Badr's deliberate call,
   recorded in decisions.md 2026-08-20. It matters going into phase 2 because
   design.md section 6 says hit stop, shake and flash **hide bad timing**. If the
@@ -29,24 +31,38 @@ Update this block at the end of every batch. Keep it to a few lines.
   effects layer, and see `GAME_PACE` below.
 - **In a half state:** nothing.
 
-### The feel layer
+### The feel and audio layers
 
-`game/feel/` holds two modules and no Phaser imports. `impacts.ts` is the shared
-trigger: it watches `boat.hull` and `fish.resistance` for drops and reports
-`{ target, damage }`. That works because those are the fight's only two damage
-sinks and nothing heals either, so a drop **is** an impact and its size **is**
-the damage. It keeps its own last-seen values rather than reading
+`game/feel/` holds three modules and no Phaser imports. `impacts.ts` is the
+shared trigger: it watches `boat.hull` and `fish.resistance` for drops and
+reports `{ target, damage }`. That works because those are the fight's only two
+damage sinks and nothing heals either, so a drop **is** an impact and its size
+**is** the damage. It keeps its own last-seen values rather than reading
 `driver.previous`, because a slow frame runs several catch-up ticks and a hit on
-the first of them would already be in both. **2.3 uses this, it does not need a
-new trigger.**
+the first of them would already be in both. **The shake, the flash and the audio
+all read from this one list**, so the ear and the eye cannot disagree about what
+happened.
 
-`shake.ts` and `flash.ts` are the effects. All three modules count in real
-milliseconds rather than ticks, none is paced, and each clamps its delta with
-`MAX_FRAME_MS`: feel is wall-clock, nothing in the simulation is timed against
-it, and design.md states these in frames. That shape has now been used three
-times and belongs in patterns.md, held back only until 2.4 says whether audio
-follows it too. `Math.random` lives here and nowhere else — `sim/` stays
-deterministic.
+`shake.ts` and `flash.ts` are the effects. Both count in real milliseconds rather
+than ticks, neither is paced, and both clamp their delta with `MAX_FRAME_MS`:
+feel is wall-clock, nothing in the simulation is timed against it, and design.md
+states these in frames. `Math.random` lives in `shake.ts` and `synth.ts` and
+nowhere else — `sim/` stays deterministic.
+
+`game/audio/` is split the same way `sim/` and `game/` are, and for the same
+reason. `cues.ts` is pure TypeScript that decides *which* of four cues fired and
+is unit tested; `synth.ts` makes the noise through Phaser's own audio context and
+is not, per architecture.md section 9. **`FightAudioPlayer` is the seam real audio
+arrives through**: four cue names are the whole contract, so replacing the
+synthesised placeholder means a new implementation of a one-method interface and
+deleting the `SOUND_*` table, nothing else.
+
+Neither of the two shapes above is in patterns.md yet, and both are close.
+"Wall-clock milliseconds, unpaced, `MAX_FRAME_MS`-clamped" has two uses, not the
+three that promotes a pattern — hit stop would have been the third and was cut.
+"Hold your own last-seen value rather than reading `driver.previous`" also has
+two, `ImpactWatcher` and `CueWatcher`. **Whichever gets a third use next should be
+written up then.**
 
 The division of labour between the two effects is deliberate and worth keeping:
 **the shake says how hard, the flash says which.** That is why the flash is not
@@ -299,7 +315,9 @@ honestly how much of the feel comes from mechanics.
 - [x] **2.3 Hit flash.** Struck sprite pure white for 2 frames. Closed
       2026-08-20, taken literally from design.md and unscaled by damage. Needed
       no sim change: see open finding 1 below.
-- [ ] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss.
+- [x] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss. Closed
+      2026-08-20 as four synthesised placeholders behind a swap seam, no assets
+      and no new dependencies. Badr intends to outsource real audio later.
 - [ ] **2.5 Feel tuning pass.**
 
 2.1's cut put the whole phase in question, since all three effects rest on the

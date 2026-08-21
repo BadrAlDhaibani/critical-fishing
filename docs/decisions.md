@@ -980,3 +980,57 @@ drains and refills.
 What actually remains is narrower and is now written into the finding: no visual
 for the attack travelling the line, which is phase 8.2's, and a refused attack
 being silent, which was never actually decided and belongs at 2.5.
+
+## 2026-08-20: Core sounds synthesised as placeholders, behind a swap seam
+
+Task 2.4, and the first task in the project needing assets. Three options were
+put to Badr — synthesise in code, wait for him to supply files, or synthesise now
+and replace later — and he chose the third, intending to outsource real audio.
+
+Four sounds are generated from oscillators plus a noise buffer at run time. No
+files, no new dependencies, and every sound is a row of numbers in `config.ts`
+rather than an asset to re-export. The same bet as the coloured rectangles: it
+can be judged before anything is made.
+
+**`FightAudioPlayer` is the seam and `Cue` is the contract.** Four strings —
+`attack`, `hurt`, `telegraph`, `loss` — are the whole of what the fight knows
+about audio. Real files arrive as a different implementation of a one-method
+interface plus a Phaser `preload`, and the `SOUND_*` table gets deleted rather
+than converted. Nothing else in the game changes.
+
+Phaser's own audio context is used rather than a fresh one, because browsers keep
+audio suspended until the page is interacted with and Phaser already handles that
+unlocking. A second context would sit silent with nothing watching for the
+gesture. Where Phaser hands back a non-Web-Audio manager the player falls back to
+silence rather than throwing: sound is the one layer of this game whose absence
+should cost nothing but sound.
+
+Three calls inside that are design rather than plumbing:
+
+- **design.md's "hit" is read as the boat being hit**, not as the player's attack
+  connecting. For the player, firing and connecting are the same event, so
+  `attack` already covers it, and the one on the receiving end is the more useful
+  to hear.
+- **One telegraph cue for both fish attacks**, not one each. The same call
+  `COLOUR_TELEGRAPH` already makes for the eye: one signal means danger whatever
+  shape it is in, so the player learns the signal rather than a vocabulary of
+  them. Which attack it is stays the telegraph's shape to say. It also fires once,
+  on entering the wind-up, and is ordered ahead of the damage cues in a frame that
+  has both, being the only one about something that has not happened yet.
+- **Winning is silent.** design.md section 2 makes the reel-in the payoff beat and
+  phase 8 hard swaps the music there. A sting now would be squatting on it.
+
+The frequencies, durations and gains were **picked rather than asked for**, which
+is a deliberate exception to the rule about not inventing tunables: a frequency
+cannot be judged without hearing it. They are a first cut for 2.5 to argue with,
+and `SOUND_MASTER_GAIN` exists so the whole bank moves with one number.
+
+## 2026-08-20: `npm run test` passing is not evidence the build is sound
+
+Caught at 2.4. A wrong type name (`FightAttackPhase` for `FishAttackPhase`) was
+imported, and the full suite passed over it: vitest strips types without checking
+them, so only `tsc` in `npm run build` found it.
+
+Recorded because the natural habit is to treat a green suite as the gate.
+**`npm run build` has to stay in the loop alongside `npm run test`**, and a task
+is not verified until both have run.
