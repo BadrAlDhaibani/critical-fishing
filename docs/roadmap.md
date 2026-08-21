@@ -12,26 +12,56 @@ genuinely need more mid-task.
 
 Update this block at the end of every batch. Keep it to a few lines.
 
-- **Current phase:** 2, game feel, still rectangles.
-- **Last completed task:** 2.4, core sounds. **2.1 was built and cut**, see the
-  phase 2 list below and decisions.md. Phase 1 is complete apart from 1.2c, still
-  open and still not gameplay-blocking.
-- **Next task:** 2.5, the feel tuning pass, which closes phase 2. _Context:
-  design.md section 6._ It is a tuning pass over everything 2.2 to 2.4 built, so
-  the numbers to argue about are `SHAKE_*`, `HIT_FLASH_FRAMES` and the four
-  `SOUND_*` rows plus `SOUND_MASTER_GAIN`, all in `data/config.ts`. Two things
-  already queued for it: the audio bank's frequencies were **picked rather than
-  asked for**, since a frequency cannot be judged without hearing it, and open
-  finding 1 below leaves "a refused attack is silent" as a real gap that was
-  never actually decided.
-- **Phase 1 exited without its twenty-fight exit test.** Badr's deliberate call,
-  recorded in decisions.md 2026-08-20. It matters going into phase 2 because
-  design.md section 6 says hit stop, shake and flash **hide bad timing**. If the
-  fight starts reading as unfair or mushy, suspect the phase 1 tuning before the
-  effects layer, and see `GAME_PACE` below.
+- **Current phase:** 3, prove the content template.
+- **Last completed task:** 2.5, the feel tuning pass, which **closes phase 2**.
+  It moved no numbers at all — everything was played and kept, see decisions.md.
+  **2.1 was built and cut**, see the phase 2 list below. Phase 1 is complete
+  apart from 1.2c, still open and still not gameplay-blocking.
+- **Next task:** 3.1, extract the fish to a data file. _Context: architecture.md
+  section 4, design.md sections 2 and 3._ Read "What 3.1 is actually walking
+  into" below before starting: it is a wider change than the task line suggests.
+- **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
+  two of the three effects design.md section 6 warns **hide bad timing**. Badr's
+  deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
+  reading as unfair or mushy, suspect the phase 1 tuning before the effects
+  layer, and see `GAME_PACE` below.
 - **In a half state:** nothing.
 
+### What 3.1 is actually walking into
+
+The fight is still hard-coded for one grey box fish. Field names on `FightState`
+already match the architecture.md section 4 sketch, so the `sim/` half is a move
+rather than a rewrite, and nothing has an `id`, a `weight` or a `punishes` yet,
+deliberately. Three things make it bigger than that sentence implies, and all
+three were found by reading the imports rather than by doing the work:
+
+1. **The render layer reads fish constants directly.** `game/render/telegraph.ts`
+   imports `FISH_CLOSE_HITBOX_WIDTH`, `FISH_WIDTH`, `FISH_HEIGHT` and
+   `FISH_FAR_TELL_PADDING`; `game/render/projectiles.ts` imports the
+   `FISH_FAR_SHOT_*` values; `FightScene` imports `FISH_WIDTH` and `FISH_HEIGHT`.
+   A definition that only `sim/` reads would draw fish two's telegraph at fish
+   one's size. **The definition has to reach the renderer too**, which is the
+   part of 3.1 most likely to be missed.
+2. **`SHAKE_MAX_DAMAGE` is `FISH_CLOSE_HULL_DAMAGE`.** A `game/feel/` constant
+   pinned to one fish's biggest hit, on purpose, so the biggest shake and the
+   biggest hit could not come apart. Once damage is per-fish, "the biggest hit in
+   the game" stops being a constant. Decide deliberately whether the shake ceiling
+   becomes a game constant or goes per-fish; do not let it silently keep pointing
+   at fish one. `shake.ts` already clamps above it, so nothing breaks loudly.
+3. **Which constants are the fish's and which are the engine's is the real
+   question 3.1 answers**, and `data/config.ts` currently mixes them. The band
+   edges, resting depths, swim and dive rates and both punishers' full timings
+   read as fish data; `FISH_FAR_TELL_PADDING` and the shot dimensions read as
+   presentation. Getting this line wrong is what makes 3.3 need engine edits,
+   which that task says explicitly is the signal to stop.
+
+Open findings 2, 3 and 4 below are all phase 3 work and all touch `attackForBand`.
+Read them before designing the definition format, not after.
+
 ### The feel and audio layers
+
+Phase 2, complete and unlikely to need reopening, but it constrains what 3.1 may
+assume.
 
 `game/feel/` holds three modules and no Phaser imports. `impacts.ts` is the
 shared trigger: it watches `boat.hull` and `fish.resistance` for drops and
@@ -41,13 +71,15 @@ damage sinks and nothing heals either, so a drop **is** an impact and its size
 `driver.previous`, because a slow frame runs several catch-up ticks and a hit on
 the first of them would already be in both. **The shake, the flash and the audio
 all read from this one list**, so the ear and the eye cannot disagree about what
-happened.
+happened. Anything phase 3 adds that hurts either side gets shake, flash and
+sound for free; anything that damages something *else* gets none of it.
 
 `shake.ts` and `flash.ts` are the effects. Both count in real milliseconds rather
 than ticks, neither is paced, and both clamp their delta with `MAX_FRAME_MS`:
 feel is wall-clock, nothing in the simulation is timed against it, and design.md
 states these in frames. `Math.random` lives in `shake.ts` and `synth.ts` and
-nowhere else — `sim/` stays deterministic.
+nowhere else — `sim/` stays deterministic, which is the constraint open finding 3's
+weighted attack selection has to be built inside.
 
 `game/audio/` is split the same way `sim/` and `game/` are, and for the same
 reason. `cues.ts` is pure TypeScript that decides *which* of four cues fired and
@@ -55,7 +87,10 @@ is unit tested; `synth.ts` makes the noise through Phaser's own audio context an
 is not, per architecture.md section 9. **`FightAudioPlayer` is the seam real audio
 arrives through**: four cue names are the whole contract, so replacing the
 synthesised placeholder means a new implementation of a one-method interface and
-deleting the `SOUND_*` table, nothing else.
+deleting the `SOUND_*` table, nothing else. `audition.ts` is a DOM panel that
+fires any cue on demand, added at 2.5 and kept — real audio will want auditioning
+too. One telegraph cue covers **both** fish attacks deliberately, so a third
+attack needs no fifth cue.
 
 Neither of the two shapes above is in patterns.md yet, and both are close.
 "Wall-clock milliseconds, unpaced, `MAX_FRAME_MS`-clamped" has two uses, not the
@@ -69,13 +104,13 @@ The division of labour between the two effects is deliberate and worth keeping:
 scaled by damage — a flash proportional to a 6-damage chip hit would read as a
 near miss, and the magnitude is already carried.
 
-Two things 2.3 inherits and should not rediscover:
+Two traps that cost a wrong attempt each and should not be rediscovered:
 
 1. **Apply a visibility floor after the rounding, not before.** The shake's
    offset is `max(1, round(amplitude))` and not `round(random * amplitude)`. The
    second collapsed roughly two frames in three to zero at low amplitudes, so the
-   lightest hits shook only sometimes. A flash drawn on the same pixel grid has
-   the same trap. See decisions.md 2026-08-20.
+   lightest hits shook only sometimes. Anything drawn on the pixel grid has the
+   same trap. In patterns.md as an anti-pattern, and in decisions.md 2026-08-20.
 2. **The camera scrolls, so anything full-screen needs `setScrollFactor(0)` or a
    margin.** The water rectangle is overdrawn by `SHAKE_MAX_AMPLITUDE` on three
    sides and the ending tint is pinned to the camera, or a shake pulls the canvas
@@ -165,20 +200,14 @@ precisely because nothing simulates.
 
 ### Open findings, none of them started
 
-1. **Mostly closed at 2.3, and the sim field it asked for turned out not to be
-   needed.** The finding said a landed attack could only be shown by adding a
-   field to `FightState`. `ImpactWatcher` disproved that: the basic attack always
-   deals damage when it fires, so "an attack landed" and "resistance dropped" are
-   the same event, and the fish flashing white is the representation. Nothing in
-   `sim/` was touched. Two things genuinely remain, and they are separate:
-   - **No visual for the attack travelling the line.** Phase 8.2's signature
-     visual owns this, as the original finding said. The asymmetry until then:
-     both fish attacks are telegraphed and its shots are drawn, the player's
-     swing is not — only its arrival is.
-   - **A refused attack is silent.** On cooldown or unaffordable, the press does
-     nothing at all and nothing says why. Deliberate for the dash (see
-     `sim/fight.ts`, where all the refusals are silent by design), never actually
-     decided for the attack. Worth raising at **2.5**, the feel tuning pass.
+1. **Nearly closed. One thing left, and it belongs to phase 8.2.** **No visual
+   for the attack travelling the line.** The asymmetry until then: both fish
+   attacks are telegraphed and its shots are drawn, the player's swing is not —
+   only its arrival is. The rest of this finding closed at 2.3 and 2.5. The sim
+   field it originally asked for was never needed: the basic attack always deals
+   damage when it fires, so "an attack landed" and "resistance dropped" are the
+   same event. A refused attack **stays silent**, decided at 2.5, matching the
+   dash. Both in decisions.md.
 2. **A second attack in the close band**, the structural fix for close camping
    that round 1 could only narrow with numbers. Makes the grey box fish an
    "uncommon" under design.md section 3's rarity ladder, so it needs a design yes
@@ -318,7 +347,15 @@ honestly how much of the feel comes from mechanics.
 - [x] **2.4 Core sounds.** Three or four: attack, hit, fish attack, loss. Closed
       2026-08-20 as four synthesised placeholders behind a swap seam, no assets
       and no new dependencies. Badr intends to outsource real audio later.
-- [ ] **2.5 Feel tuning pass.**
+- [x] **2.5 Feel tuning pass.** Closed 2026-08-20 having **changed no numbers**:
+      every `SHAKE_*`, `HIT_FLASH_FRAMES`, the four `SOUND_*` rows and
+      `SOUND_MASTER_GAIN` were played and kept. Added the cue audition panel and
+      settled that a refused attack stays silent. See decisions.md, which also
+      records the one caveat: audio and visuals were judged in one sitting rather
+      than the two rounds planned.
+
+**Phase 2 is closed.** Two of the three effects design.md section 6 asks for
+shipped; hit stop was cut at its playtest gate and is deferred to phase 8.
 
 2.1's cut put the whole phase in question, since all three effects rest on the
 same feel-before-art bet. Badr's call is that it does not generalise: freezing

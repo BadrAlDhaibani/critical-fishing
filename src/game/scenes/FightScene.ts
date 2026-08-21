@@ -47,6 +47,7 @@ import { Flash } from '../feel/flash.ts';
 import { ImpactWatcher } from '../feel/impacts.ts';
 import { CueWatcher, type FightAudioPlayer } from '../audio/cues.ts';
 import { createFightAudio } from '../audio/synth.ts';
+import { CueAudition } from '../audio/audition.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -218,6 +219,12 @@ export class FightScene extends Phaser.Scene {
       .setVisible(false);
 
     this.overlay = new DebugOverlay();
+
+    // Wired once and never spoken to again: the panel owns its own buttons and
+    // drives the audio player directly, so there is nothing for `update` to do.
+    // Tuning tooling for task 2.5, and it plays through the same seam the fight
+    // does so the two can never be levelled differently.
+    new CueAudition(this.audio);
   }
 
   /**

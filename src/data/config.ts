@@ -636,8 +636,10 @@ export const HIT_FLASH_FRAMES = 2;
  * simulation timed against it, and no inequality involves it.
  *
  * Numbers picked rather than asked for, deliberately and unusually. A frequency
- * cannot be judged without hearing it, so these are a first cut for task 2.5,
- * the feel tuning pass, to argue with.
+ * cannot be judged without hearing it, so these were a first cut for task 2.5 to
+ * argue with — and at that pass they were auditioned one by one and kept
+ * unchanged, master gain included. They are approved values now, not a guess
+ * nobody has heard.
  */
 export interface SoundDefinition {
   fromHz: number;

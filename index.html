@@ -43,11 +43,36 @@
         pointer-events: none;
         user-select: none;
       }
+      /* Cue audition buttons for the task 2.5 tuning pass. See
+         game/audio/audition.
+
+         Bottom right, opposite the readout, because both are debug chrome and
+         neither should cover the other. This one is the exception to the
+         pointer-events rule above: it is the only chrome that is clicked rather
+         than read. */
+      #audition {
+        position: fixed;
+        bottom: 8px;
+        right: 8px;
+        display: flex;
+        gap: 4px;
+      }
+      #audition button {
+        font:
+          12px/1.4 ui-monospace,
+          monospace;
+        color: #fff;
+        background: #222;
+        border: 1px solid #555;
+        padding: 2px 8px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <pre id="debug"></pre>
+    <div id="audition"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

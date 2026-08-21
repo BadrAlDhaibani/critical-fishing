@@ -1034,3 +1034,44 @@ them, so only `tsc` in `npm run build` found it.
 Recorded because the natural habit is to treat a green suite as the gate.
 **`npm run build` has to stay in the loop alongside `npm run test`**, and a task
 is not verified until both have run.
+
+## 2026-08-20: The 2.5 tuning pass moved nothing
+
+Task 2.5, and it closes phase 2. Every lever was played and every one was left
+where it was: `SOUND_MASTER_GAIN`, the four `SOUND_*` rows, the three `SHAKE_*`
+values and `HIT_FLASH_FRAMES`. Badr's verdict was "literally no complaints".
+
+Recorded because a pass that changes nothing is indistinguishable from a pass
+that never ran, and the difference matters here. The four sound rows were
+**picked rather than asked for** at 2.4, flagged there as a deliberate exception
+to the rule against inventing tunables. This is the pass that converts them from
+invented to approved, and `config.ts` now says so.
+
+The audio was auditioned cue by cue through a DOM panel added for this pass
+(`game/audio/audition.ts`), which plays through the same `FightAudioPlayer` the
+fight does. It stays: it is debug chrome like the readout, and it outlives the
+placeholder bank, since real audio will want auditioning too.
+
+**One caveat worth having in writing.** The plan ran audio first and the visuals
+second, on the reasoning that the shake was cut from 3-over-12 to 2-over-8 in a
+completely silent game and a thud now carries part of the weight it carried
+alone. In the event both were judged in one sitting rather than two. The shake
+and flash values are therefore confirmed, but not confirmed *against that
+specific question*. If the shake ever reads as redundant next to the audio, this
+is why, and the answer is to lower it rather than to suspect anything else.
+
+## 2026-08-20: A refused attack stays silent
+
+Badr's call at 2.5, and it closes the remainder of open finding 1.
+
+Pressing attack on cooldown or without the stamina to pay does nothing and says
+nothing. That now matches the dash, where `sim/fight.ts` already makes every
+refusal silent by design, so the two actions sharing a pool also share how they
+answer being asked for more than there is.
+
+Considered and rejected: a fifth cue, which would have widened the audio contract
+that 2.4 deliberately fixed at four strings, and a stamina bar flash, which is a
+renderer change rather than a tuning one and would have been its own task.
+
+What remains of open finding 1 is now only phase 8.2's: no visual for the attack
+travelling the line.
