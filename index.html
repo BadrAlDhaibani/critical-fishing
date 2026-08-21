@@ -57,7 +57,21 @@
         display: flex;
         gap: 4px;
       }
-      #audition button {
+      /* Fish picker for the task 3.3 playtest. See game/scenes/fishPicker.
+
+         Stacked directly above the audition row rather than beside it: both are
+         clickable debug chrome and the bottom right corner is where that lives,
+         but a single row of seven buttons would start creeping across the
+         letterbox. */
+      #fish-picker {
+        position: fixed;
+        bottom: 38px;
+        right: 8px;
+        display: flex;
+        gap: 4px;
+      }
+      #audition button,
+      #fish-picker button {
         font:
           12px/1.4 ui-monospace,
           monospace;
@@ -67,11 +81,20 @@
         padding: 2px 8px;
         cursor: pointer;
       }
+      /* The fish currently being fought. Brightened rather than dimmed: it is
+         the one piece of information this panel carries beyond its own labels,
+         and a greyed-out button would read as unavailable instead. */
+      #fish-picker button.current {
+        color: #000;
+        background: #d8cfc0;
+        border-color: #d8cfc0;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <pre id="debug"></pre>
+    <div id="fish-picker"></div>
     <div id="audition"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -46,6 +46,7 @@ import { ImpactWatcher } from '../feel/impacts.ts';
 import { CueWatcher, type FightAudioPlayer } from '../audio/cues.ts';
 import { createFightAudio } from '../audio/synth.ts';
 import { CueAudition } from '../audio/audition.ts';
+import { FishPicker, selectedFish } from './fishPicker.ts';
 
 /**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
@@ -229,6 +230,11 @@ export class FightScene extends Phaser.Scene {
     // Tuning tooling for task 2.5, and it plays through the same seam the fight
     // does so the two can never be levelled differently.
     new CueAudition(this.audio);
+
+    // The same, for task 3.3: three fish added as data are unplayable without
+    // some way to ask for one. Also fire and forget, and more so — selecting a
+    // fish reloads the page rather than talking to this scene. See fishPicker.ts.
+    new FishPicker();
   }
 
   /**
@@ -242,8 +248,13 @@ export class FightScene extends Phaser.Scene {
    * snapshot, so it survives being made once here and used for every fight.
    */
   private startFight(): void {
-    this.driver = new FixedStepDriver<FightState>(createFightState(), (state) =>
-      stepFight(state, this.inputs),
+    // Re-read rather than cached, so the fish is whatever the address bar says
+    // at the moment a fight starts and there is no second copy of that answer to
+    // drift from it. Until phase 4.1's encounter roll, the URL is the only thing
+    // that decides this. See fishPicker.ts.
+    this.driver = new FixedStepDriver<FightState>(
+      createFightState(selectedFish()),
+      (state) => stepFight(state, this.inputs),
     );
 
     // Rebuilt alongside the driver for the same reason it is: the watcher holds
