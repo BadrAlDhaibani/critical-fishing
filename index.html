@@ -81,18 +81,47 @@
         padding: 2px 8px;
         cursor: pointer;
       }
-      /* The fish currently being fought. Brightened rather than dimmed: it is
-         the one piece of information this panel carries beyond its own labels,
-         and a greyed-out button would read as unavailable instead. */
+      /* The fish every cast is pinned to, when one is. Brightened rather than
+         dimmed: it is the one piece of information this panel carries beyond its
+         own labels, and a greyed-out button would read as unavailable instead.
+         Nothing is marked while casts are rolling. */
       #fish-picker button.current {
         color: #000;
         background: #d8cfc0;
         border-color: #d8cfc0;
       }
+      /* The cast prompt, and the fish a cast hooked. See game/render/castPrompt.
+
+         The one piece of *game* UI outside the canvas, and a placeholder: it is
+         text, and canvas text cannot be sharp under nearest-neighbour upscaling
+         until there is a bitmap font at phase 8.1. Centred over the whole window
+         rather than over the canvas, which is itself centred and letterboxed, so
+         the two agree at every zoom without either knowing the other's size.
+
+         Low in the window rather than in the middle of it: the fight happens
+         under the waterline and the bars sit in the sky, so this is the one band
+         of screen nothing else is using. */
+      #cast-prompt {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 18%;
+        margin: 0;
+        text-align: center;
+        font:
+          16px/1.4 ui-monospace,
+          monospace;
+        letter-spacing: 0.1em;
+        color: #fff;
+        text-shadow: 0 2px 4px #000;
+        pointer-events: none;
+        user-select: none;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="cast-prompt"></div>
     <pre id="debug"></pre>
     <div id="fish-picker"></div>
     <div id="audition"></div>

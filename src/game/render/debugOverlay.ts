@@ -43,6 +43,16 @@ export interface DebugFields {
    */
   stage: string;
   stageTicks: number;
+  /**
+   * The fish this fight hooked. Added at task 4.1, when which fish you are
+   * fighting stopped being something the address bar already told you.
+   *
+   * The name rather than the id, since it is the same word the cast banner used
+   * and the record book will use. It is on screen for the whole fight because the
+   * banner is not: a spread that looks wrong over a dozen casts is checked by
+   * reading this, and by then the banner is long gone.
+   */
+  species: string;
   /** Hull HP, current and full. */
   hull: number;
   hullMax: number;
@@ -155,6 +165,7 @@ export class DebugOverlay {
       `sim    ${fields.tickRate.toFixed(1)}/${fields.targetTickRate} ticks/s`,
       `ticks  ${fields.totalTicks}`,
       `stage  ${stageLabel(fields)}`,
+      `hooked ${fields.species}`,
       `hull   ${fields.hull}/${fields.hullMax}`,
       `stam   ${Math.floor(fields.stamina)}/${fields.staminaMax}`,
       `tether ${fields.lineLength.toFixed(1)} u  (${fields.band})`,

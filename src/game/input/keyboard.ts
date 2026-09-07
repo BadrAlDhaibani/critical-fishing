@@ -28,19 +28,24 @@ export interface FightControls {
    */
   heavy: Phaser.Input.Keyboard.Key;
   /**
-   * Start a fresh fight once this one is over. Approved 2026-08-20, because task
-   * 1.13 is twenty playthroughs and reloading the page for each of them is not a
-   * reasonable way to spend them.
+   * Cast a line, which rolls an encounter and starts the fight it hooks.
+   *
+   * **The same physical key as the restart approved 2026-08-20**, widened rather
+   * than added to at task 4.1: `R` used to mean "fight that fish again" and now
+   * means "cast again", which is the same press in the same place at the same
+   * moment. A second key for casting would be a new binding, and this file treats
+   * one of those as a design proposal rather than a convenience.
    *
    * Deliberately absent from `FightInputs` below, and the split is the point.
-   * Restarting is not something a boat does inside a fight, it is the meta
-   * layer's job: design.md section 5 has a loss consume the bait, damage the rod
-   * and write a record book entry, none of which the simulation knows about.
-   * Keeping it out of `FightInputs` keeps the phase 7 wire contract to things the
-   * fight actually acts on, and keeps sim/ ignorant of a concept it has no
-   * business holding. `FightScene` reads this key directly.
+   * Casting is not something a boat does inside a fight, it is the meta layer's
+   * job: design.md section 5 has a cast roll an encounter and a loss consume the
+   * bait, damage the rod and write a record book entry, none of which the
+   * simulation knows about. Keeping it out of `FightInputs` keeps the phase 7
+   * wire contract to things the fight actually acts on, and keeps sim/ ignorant
+   * of a concept it has no business holding. `FightScene` reads this key
+   * directly.
    */
-  restart: Phaser.Input.Keyboard.Key;
+  cast: Phaser.Input.Keyboard.Key;
 }
 
 export function createFightControls(scene: Phaser.Scene): FightControls {
@@ -71,7 +76,7 @@ export function createFightControls(scene: Phaser.Scene): FightControls {
     // Well away from A, D, shift and space, so a hand still on the controls at
     // the moment a fight ends cannot fat-finger it. The scene ignores it while a
     // fight is running for the same reason.
-    restart: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
+    cast: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
   };
 }
 

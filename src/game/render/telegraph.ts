@@ -57,6 +57,18 @@ export class Telegraph {
   }
 
   /**
+   * Draw nothing at all.
+   *
+   * For the beat before a cast, where there is no fish and therefore no
+   * definition to draw a tell at the size of. `show` cannot answer that case: its
+   * whole contract is that it is handed the fish being fought.
+   */
+  hide(): void {
+    this.column.setVisible(false);
+    this.outline.setVisible(false);
+  }
+
+  /**
    * @param patternId Which of `fish`'s patterns is running, or null while idle.
    * @param fish The fish being fought, so the tell is drawn at its size and its
    *   pattern's reach rather than at some other fish's.

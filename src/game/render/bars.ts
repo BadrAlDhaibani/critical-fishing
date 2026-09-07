@@ -20,6 +20,7 @@ import {
 import { barFillWidth } from './barGeometry.ts';
 
 export class Bar {
+  private readonly backdrop: Phaser.GameObjects.Rectangle;
   private readonly fill: Phaser.GameObjects.Rectangle;
 
   /**
@@ -29,7 +30,7 @@ export class Bar {
    *   empty one still reads as a bar rather than as a gap in the UI.
    */
   constructor(scene: Phaser.Scene, x: number, y: number, colour: number) {
-    scene.add
+    this.backdrop = scene.add
       .rectangle(x, y, BAR_WIDTH, BAR_HEIGHT, COLOUR_BAR_BACKDROP)
       .setOrigin(0, 0);
 
@@ -39,6 +40,19 @@ export class Bar {
     this.fill = scene.add
       .rectangle(x, y, BAR_WIDTH, BAR_HEIGHT, colour)
       .setOrigin(0, 0);
+  }
+
+  /**
+   * Show or hide the whole bar, backdrop included.
+   *
+   * The backdrop is held for this alone. An empty bar still reads as a bar, which
+   * is what it is for during a fight and exactly wrong before one: a full-width
+   * empty hull backdrop on the cast screen would say the boat is already dead.
+   * There are no numbers to draw until a cast hooks something.
+   */
+  setVisible(visible: boolean): void {
+    this.backdrop.setVisible(visible);
+    this.fill.setVisible(visible);
   }
 
   set(value: number, max: number): void {

@@ -511,6 +511,22 @@ export const COLOUR_HIT_FLASH = 0xffffff;
 export const HIT_FLASH_FRAMES = 2;
 
 /**
+ * How long a cast names the fish it hooked. Task 4.1.
+ *
+ * Long enough to read four words while the fight is opening, short enough to be
+ * gone before the first telegraph needs the player's whole attention. The fish
+ * opens the fight at its furthest station and its long-range answer is the first
+ * thing that happens, so this has the flight of one volley to be out of the way.
+ *
+ * In milliseconds rather than frames or ticks, and **not paced**, for the reason
+ * no presentation number is: it is wall-clock, the player is reading it, and
+ * nothing in the simulation is timed against it. It is also outside the fight
+ * entirely — a cast happens between fights — so `GAME_PACE` has nothing to say
+ * about it even in principle.
+ */
+export const CAST_BANNER_MS = 2000;
+
+/**
  * The grey box sound bank. Chosen 2026-08-20, see decisions.md.
  *
  * design.md section 6 asks for three or four core sounds. These are synthesised

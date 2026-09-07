@@ -3,8 +3,10 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
   WATER_LINE_Y,
+  BOAT_START_X,
   BOAT_WIDTH,
   BOAT_HEIGHT,
+  FISH_START_X,
   COLOUR_WATER,
   COLOUR_SURFACE,
   COLOUR_BOAT,
@@ -33,6 +35,8 @@ import { lineLength } from '../../sim/distance.ts';
 import { basicAttackDamage } from '../../sim/damage.ts';
 import { createFightState, noInputs } from '../../sim/state.ts';
 import type { FightInputs, FightState } from '../../sim/state.ts';
+import type { FishDefinition } from '../../data/fish/types.ts';
+import { rollEncounter } from '../../meta/encounter.ts';
 import {
   createFightControls,
   readFightInputs,
@@ -40,6 +44,7 @@ import {
 } from '../input/keyboard.ts';
 import { DebugOverlay } from '../render/debugOverlay.ts';
 import { Bar } from '../render/bars.ts';
+import { CastPrompt } from '../render/castPrompt.ts';
 import { Telegraph } from '../render/telegraph.ts';
 import { Projectiles } from '../render/projectiles.ts';
 import { Shake } from '../feel/shake.ts';
@@ -48,7 +53,7 @@ import { ImpactWatcher } from '../feel/impacts.ts';
 import { CueWatcher, type FightAudioPlayer } from '../audio/cues.ts';
 import { createFightAudio } from '../audio/synth.ts';
 import { CueAudition } from '../audio/audition.ts';
-import { FishPicker, selectedFish } from './fishPicker.ts';
+import { FishPicker, overrideFish } from './fishPicker.ts';
 
 /**
  * A fresh opening seed for a fight, as a signed 32-bit integer.
@@ -72,7 +77,19 @@ function randomSeed(): number {
  * the screen to put it.
  */
 export class FightScene extends Phaser.Scene {
-  private driver!: FixedStepDriver<FightState>;
+  /**
+   * The fight being played, and **null until the first cast**.
+   *
+   * Nullable since task 4.1, which is the honest shape: the game now opens on a
+   * boat that has not cast yet, and there is no fish, no resistance and no line
+   * length until the encounter roll has run. Seeding a fight nobody asked for
+   * just to keep this non-null would put a fish in the water behind the cast
+   * prompt and make the first cast a lie.
+   *
+   * Every reader takes it as a local rather than reading the field twice, so the
+   * null check happens exactly once per frame.
+   */
+  private driver: FixedStepDriver<FightState> | null = null;
   private controls!: FightControls;
   private inputs: FightInputs = noInputs();
 
@@ -117,6 +134,13 @@ export class FightScene extends Phaser.Scene {
   private cues!: CueWatcher;
 
   private overlay!: DebugOverlay;
+  /**
+   * The words the loop says: what to press to cast, and what the cast hooked.
+   *
+   * In the DOM rather than the canvas, and a placeholder until phase 8.1 has a
+   * bitmap font. See castPrompt.ts, which has the whole argument.
+   */
+  private castPrompt!: CastPrompt;
   private elapsedMs = 0;
 
   constructor() {
@@ -157,11 +181,10 @@ export class FightScene extends Phaser.Scene {
 
     this.controls = createFightControls(this);
 
-    // Before `startFight`, which seeds the cue watcher off the first state.
+    // Before any cast, which seeds the cue watcher off the first state. Built
+    // once and reused by every fight, because it owns a gain node on Phaser's
+    // audio graph and a fresh one per cast would leak one per cast.
     this.audio = createFightAudio(this);
-
-    this.startFight();
-    const initialState = this.driver.current;
 
     // Added before the boat and fish so it draws underneath both, and the
     // endpoints disappear into the hull and the body rather than crossing them.
@@ -174,8 +197,12 @@ export class FightScene extends Phaser.Scene {
     // Sits on the surface rather than in it, so the waterline reads as the
     // thing the boat is floating on. Only x is simulated; y is a render
     // constant, because the boat has one axis.
+    //
+    // Placed at the boat's own starting x rather than read off a fight, since
+    // there is no fight until a cast: the boat waiting to cast is standing where
+    // the fight it is about to start will open.
     this.boat = this.add.rectangle(
-      initialState.boat.x,
+      BOAT_START_X,
       WATER_LINE_Y - BOAT_HEIGHT / 2,
       BOAT_WIDTH,
       BOAT_HEIGHT,
@@ -186,23 +213,24 @@ export class FightScene extends Phaser.Scene {
     // the simulation's vertical axis is expressed against. This is the only
     // place that conversion happens.
     //
-    // Sized from the fish being fought rather than from a constant, since task
-    // 3.1 made a fish's proportions its own. Sized once, at construction: there
-    // is one fish per fight and restarting reuses it, so this is correct until
-    // phase 4.1's encounter roll can hand `startFight` a different one.
-    this.fish = this.add.rectangle(
-      initialState.fish.x,
-      WATER_LINE_Y + initialState.fish.depth,
-      initialState.fish.definition.width,
-      initialState.fish.definition.height,
-      COLOUR_FISH,
-    );
+    // **Not sized here**, which is the task 4.1 change and the debt decisions.md
+    // 2026-08-21 said would come due at the encounter roll. A fish's proportions
+    // are its own, and the roll hands this scene a different fish on every cast,
+    // so the size is set per cast in `cast` below rather than once at
+    // construction. Created hidden, at a placeholder size, because until a cast
+    // there is nothing in the water at all.
+    this.fish = this.add
+      .rectangle(FISH_START_X, WATER_LINE_Y, 1, 1, COLOUR_FISH)
+      .setVisible(false);
 
     // Over the fish and the water but under nothing else, so a shot climbing
     // past the fish that fired it stays readable. It is the one thing on screen
-    // the player has to track continuously. Handed the definition for the same
-    // reason the fish rectangle is sized from it: shot widths are per pattern.
-    this.projectiles = new Projectiles(this, initialState.fish.definition);
+    // the player has to track continuously.
+    //
+    // No definition here either, for the same reason, and its pool is sized to
+    // the largest volley in the game rather than to one fish's, so a cast only
+    // has to point it at a different definition rather than rebuild it.
+    this.projectiles = new Projectiles(this);
 
     // Both sides' bars live in the sky above the waterline: the player's
     // stacked at the left, the fish's at the right, so the fight reads as one
@@ -242,6 +270,12 @@ export class FightScene extends Phaser.Scene {
       .setVisible(false);
 
     this.overlay = new DebugOverlay();
+    this.castPrompt = new CastPrompt();
+
+    // Nothing of the fight is on screen until a cast has hooked something. The
+    // water, the surface and the boat stay, so what the player is looking at is a
+    // boat that has not cast yet rather than an empty screen.
+    this.hideFight();
 
     // Wired once and never spoken to again: the panel owns its own buttons and
     // drives the audio player directly, so there is nothing for `update` to do.
@@ -255,8 +289,57 @@ export class FightScene extends Phaser.Scene {
     new FishPicker();
   }
 
+  /** Everything about the fight, hidden. What the beat before a cast looks like. */
+  private hideFight(): void {
+    this.fish.setVisible(false);
+    this.line.clear();
+    this.telegraph.hide();
+    this.projectiles.show([]);
+    this.endingTint.setVisible(false);
+    this.hullBar.setVisible(false);
+    this.lineBar.setVisible(false);
+    this.resistanceBar.setVisible(false);
+  }
+
   /**
-   * Point the driver at a brand new fight.
+   * Cast a line: roll what it hooks, and start that fight.
+   *
+   * design.md section 5's first beat. **The roll is the meta layer's**, not the
+   * simulation's — `meta/encounter.ts` uses `Math.random` and owes nothing to
+   * `sim/rng.ts`, since a cast happens outside any fight and has nothing to
+   * replay. What the roll produces is handed to `createFightState` as an ordinary
+   * argument, which is all the simulation ever knew about choosing a fish.
+   *
+   * The override is read fresh on every cast rather than cached, so `?fish=`
+   * pins the whole session and there is no second copy of that answer to drift
+   * from it. It is debug tooling standing in front of the roll, not part of it.
+   * See fishPicker.ts.
+   *
+   * This is also the one place the renderer is told which fish it is drawing.
+   * Both readings that used to happen once, at construction, happen here instead:
+   * the body size and the pattern a shot's width is read from. A telegraph or a
+   * shot at another fish's size is a promise the game cannot keep, so getting
+   * this wrong is not cosmetic. See decisions.md 2026-08-21 and 2026-09-07.
+   */
+  private cast(): void {
+    const fish = overrideFish() ?? rollEncounter();
+
+    this.fish.setSize(fish.width, fish.height).setVisible(true);
+    this.projectiles.setFish(fish);
+    this.hullBar.setVisible(true);
+    this.lineBar.setVisible(true);
+    this.resistanceBar.setVisible(true);
+
+    // Named on screen for a couple of seconds. Until the record book at 4.3 this
+    // is the only thing that says what you hooked, and it is the whole reason the
+    // roll is legible as a roll rather than as fish that keep changing.
+    this.castPrompt.hooked(fish.name);
+
+    this.startFight(fish);
+  }
+
+  /**
+   * Point the driver at a brand new fight against `fish`.
    *
    * Rebuilt rather than reset, so `previous` is seeded with the fresh state too
    * and no frame interpolates the boat from where the last fight ended to where
@@ -265,37 +348,38 @@ export class FightScene extends Phaser.Scene {
    * The step closure reads `this.inputs` at call time rather than capturing a
    * snapshot, so it survives being made once here and used for every fight.
    */
-  private startFight(): void {
-    // Re-read rather than cached, so the fish is whatever the address bar says
-    // at the moment a fight starts and there is no second copy of that answer to
-    // drift from it. Until phase 4.1's encounter roll, the URL is the only thing
-    // that decides this. See fishPicker.ts.
-    //
+  private startFight(fish: FishDefinition): void {
     // This is where the simulation's randomness actually comes from, and the
     // only place it may. `sim/` cannot call `Math.random` — it moves to the
     // server in phase 7, where a fight has to replay identically — so it takes a
     // seed instead and advances it itself. Handing it a fresh one here is what
     // makes two fights against the same fish differ; `createFightState`'s
     // default is a constant so that tests do not. See sim/rng.ts.
-    this.driver = new FixedStepDriver<FightState>(
-      createFightState(selectedFish(), randomSeed()),
+    //
+    // Note the encounter roll above is **not** part of that stream and does not
+    // want to be: it is one draw outside the fight, and the seed exists for the
+    // fight's own replayability.
+    const driver = new FixedStepDriver<FightState>(
+      createFightState(fish, randomSeed()),
       (state) => stepFight(state, this.inputs),
     );
+
+    this.driver = driver;
 
     // Rebuilt alongside the driver for the same reason it is: the watcher holds
     // the last hull and resistance it saw, and a new fight refills both. Left
     // alone it would read the first real hit of the new fight against the old
     // fight's numbers.
-    this.impacts = new ImpactWatcher(this.driver.current);
+    this.impacts = new ImpactWatcher(driver.current);
 
     // Rebuilt for the same reason, and it matters more here: the watcher holds
-    // the last stage it saw. Left alone across a restart it would be holding
+    // the last stage it saw. Left alone across a cast it would be holding
     // `escaped` while the new fight is `fighting`, and the next loss would be
     // silent because the stage never appeared to change.
-    this.cues = new CueWatcher(this.driver.current);
+    this.cues = new CueWatcher(driver.current);
 
     // A shake or a flash still running from the killing blow of the last fight
-    // must not open the next one moving or lit. Restarting is an instant cut,
+    // must not open the next one moving or lit. Casting again is an instant cut,
     // the same as the ending wash it is dismissing.
     this.shake.reset();
     this.boatFlash.reset();
@@ -314,18 +398,39 @@ export class FightScene extends Phaser.Scene {
     // read even if the ticks would accept it.
     this.inputs = readFightInputs(this.controls);
 
-    // Only once a fight is over, so a hand still on the controls cannot rage
-    // restart one that is going badly. Read straight off the key rather than
-    // through FightInputs: restarting is the scene's business, not the
-    // simulation's, so `JustDown` at frame rate is the right resolution for it.
+    // Only before the first cast and once a fight is over, so a hand still on
+    // the controls cannot rage cast out of one that is going badly. Read straight
+    // off the key rather than through FightInputs: casting is the meta layer's
+    // business, not the simulation's, so `JustDown` at frame rate is the right
+    // resolution for it.
+    //
+    // **An ending is itself a cast prompt.** There is no separate step back to
+    // the waiting screen between a fight ending and the next cast: one press is
+    // exactly what the restart key did before 4.1, and a twenty-fight tuning
+    // session should not become forty presses. The waiting state is where the
+    // game opens, and nothing returns to it.
     if (
-      this.driver.current.stage !== 'fighting' &&
-      Phaser.Input.Keyboard.JustDown(this.controls.restart)
+      (this.driver === null || this.driver.current.stage !== 'fighting') &&
+      Phaser.Input.Keyboard.JustDown(this.controls.cast)
     ) {
-      this.startFight();
+      this.cast();
     }
 
-    this.driver.advance(delta);
+    // Taken as a local, so the null check above is the only one in the frame and
+    // everything below can read the fight without asking again whether there is
+    // one. A cast on this very frame has already filled it in, and the fight it
+    // started is advanced by this same frame's delta — the same as the restart
+    // it replaces.
+    const driver = this.driver;
+
+    if (driver === null) {
+      // Nothing to draw and nothing to step: the boat has not cast yet. The
+      // prompt is the only thing that updates, and it is what says so.
+      this.castPrompt.update(delta, 'waitingToCast');
+      return;
+    }
+
+    driver.advance(delta);
 
     // Sampled after the step, so a hit landed this frame shakes from this frame
     // rather than the next one. Every impact triggers, and `trigger` takes the
@@ -335,7 +440,7 @@ export class FightScene extends Phaser.Scene {
     // been carried for since 2.2. The shake says how hard and the flash says
     // which of the two it happened to, so one screen-wide effect and one local
     // one split the reading between them rather than both saying the same thing.
-    const impacts = this.impacts.sample(this.driver.current);
+    const impacts = this.impacts.sample(driver.current);
 
     for (const impact of impacts) {
       this.shake.trigger(impact.damage);
@@ -351,7 +456,7 @@ export class FightScene extends Phaser.Scene {
     // ear and the eye can never disagree about what just happened. The watcher
     // adds only what damage cannot show: the fish committing to an attack, and
     // the fight being lost.
-    for (const cue of this.cues.sample(this.driver.current, impacts)) {
+    for (const cue of this.cues.sample(driver.current, impacts)) {
       this.audio.play(cue);
     }
 
@@ -362,7 +467,7 @@ export class FightScene extends Phaser.Scene {
     const offset = this.shake.update(delta);
     this.cameras.main.setScroll(offset.x, offset.y);
 
-    const { previous, current, alpha } = this.driver;
+    const { previous, current, alpha } = driver;
     const { stage } = current;
     const fighting = stage === 'fighting';
 
@@ -460,8 +565,13 @@ export class FightScene extends Phaser.Scene {
       );
     }
 
-    this.updateBars();
-    this.updateReadout(delta);
+    // The name of what was hooked, for a couple of seconds after the cast, and
+    // the prompt to cast again once the fight is over. Both endings read the
+    // same, since design.md section 5 makes the next cast the answer to either.
+    this.castPrompt.update(delta, ended ? 'ended' : 'fighting');
+
+    this.updateBars(current);
+    this.updateReadout(delta, driver);
   }
 
   /**
@@ -469,16 +579,23 @@ export class FightScene extends Phaser.Scene {
    * positions above. A resource that drops in one tick should snap: smearing it
    * across a frame blunts exactly the impact that phase 2's hit stop and hit
    * flash exist to sharpen. Nothing moves any of these three yet.
+   *
+   * Taken as an argument rather than read off the scene, since 4.1 made the
+   * fight nullable and `update` has already answered that question for the frame.
    */
-  private updateBars(): void {
-    const { boat, fish } = this.driver.current;
+  private updateBars(state: FightState): void {
+    const { boat, fish } = state;
 
     this.hullBar.set(boat.hull, boat.hullMax);
     this.lineBar.set(boat.line, boat.lineMax);
     this.resistanceBar.set(fish.resistance, fish.resistanceMax);
   }
 
-  private updateReadout(delta: number): void {
+  /** Also handed the fight, for the reason `updateBars` is. */
+  private updateReadout(
+    delta: number,
+    driver: FixedStepDriver<FightState>,
+  ): void {
     this.elapsedMs += delta;
 
     // Long-run average rather than a count bucketed into one-second windows. A
@@ -486,9 +603,9 @@ export class FightScene extends Phaser.Scene {
     // between 60 and 61 and looks like a fault that is not there. An average
     // settles on 60.0, and real drift shows up as it sliding off that.
     const seconds = this.elapsedMs / 1000;
-    const tickRate = seconds > 0 ? this.driver.totalTicks / seconds : 0;
+    const tickRate = seconds > 0 ? driver.totalTicks / seconds : 0;
 
-    const { boat, fish, stage, stageTicksRemaining } = this.driver.current;
+    const { boat, fish, stage, stageTicksRemaining } = driver.current;
     const tether = lineLength(boat, fish);
 
     this.overlay.update({
@@ -497,9 +614,13 @@ export class FightScene extends Phaser.Scene {
       fps: this.game.loop.actualFps,
       tickRate,
       targetTickRate: TICK_HZ,
-      totalTicks: this.driver.totalTicks,
+      totalTicks: driver.totalTicks,
       stage,
       stageTicks: stageTicksRemaining,
+      // Off the definition riding on the fight rather than off the roll that
+      // produced it, so the readout can only ever name the fish actually being
+      // simulated. A mismatch between the two is exactly the fault worth seeing.
+      species: fish.definition.name,
       hull: boat.hull,
       hullMax: boat.hullMax,
       stamina: boat.line,
@@ -529,7 +650,7 @@ export class FightScene extends Phaser.Scene {
       // readout says which attack of the fish's is running even once one of them
       // has several.
       fishAttackKind: fish.attackPatternId,
-      projectiles: this.driver.current.projectiles.length,
+      projectiles: driver.current.projectiles.length,
       shakeAmplitude: this.shake.current,
     });
   }

@@ -19,21 +19,30 @@ import {
   PROJECTILE_DRAW_HEIGHT,
   WATER_LINE_Y,
 } from '../../data/config.ts';
+import { ALL_FISH } from '../../data/fish/index.ts';
 import { volleyPatternById } from '../../data/fish/types.ts';
 import type { FishDefinition } from '../../data/fish/types.ts';
 import type { ProjectileState } from '../../sim/state.ts';
 
 /**
- * Two volleys' worth of rectangles, sized to the fattest volley this fish has.
+ * Two volleys' worth of rectangles, sized to the fattest volley **any** fish has.
  *
  * More than can currently be in the air at once: against the grey box fish the
  * recovery, cooldown and wind-up come to 160 ticks while a shot from depth 100
  * flies for 83, so a volley has always landed before the next is fired. The spare
  * set is there so that a retune, or a fish that dives deeper than the one this
  * was measured on, cannot silently drop a shot the simulation says is there.
+ *
+ * Measured over the whole registry rather than over the fish being fought, which
+ * is what task 4.1 changed and why. The pool is built once, in the constructor,
+ * and the encounter roll hands this a different fish mid-session; sizing it to
+ * one fish would mean rebuilding game objects on every cast, and a rebuilt object
+ * is added to the scene last and therefore drawn on top of the bars. Sizing it to
+ * the largest volley in the game costs a handful of hidden rectangles and keeps
+ * the layering that `FightScene.create`'s add order sets up.
  */
-function poolSize(fish: FishDefinition): number {
-  const largest = fish.patterns.reduce(
+function poolSize(): number {
+  const largest = ALL_FISH.flatMap((fish) => fish.patterns).reduce(
     (most, pattern) =>
       pattern.behaviour === 'volley' ? Math.max(most, pattern.shotCount) : most,
     0,
@@ -44,17 +53,39 @@ function poolSize(fish: FishDefinition): number {
 
 export class Projectiles {
   private readonly shots: Phaser.GameObjects.Rectangle[];
-  private readonly fish: FishDefinition;
+  /**
+   * Which fish's patterns the widths are looked up through, and null before the
+   * first cast.
+   *
+   * Set by `setFish` rather than fixed at construction, since a cast can change
+   * it, and null to start with rather than defaulted to some fish, because before
+   * a cast there genuinely is no fish and a default would be a lie that only
+   * showed up as one fish's shots drawn at another's width.
+   */
+  private fish: FishDefinition | null = null;
 
-  constructor(scene: Phaser.Scene, fish: FishDefinition) {
-    this.fish = fish;
-    this.shots = Array.from({ length: poolSize(fish) }, () =>
+  constructor(scene: Phaser.Scene) {
+    this.shots = Array.from({ length: poolSize() }, () =>
       scene.add
         // Width is per shot, so it is set in `show` rather than here. Height is
         // presentation and the same for every shot in the game.
         .rectangle(0, 0, 0, PROJECTILE_DRAW_HEIGHT, COLOUR_TELEGRAPH)
         .setVisible(false),
     );
+  }
+
+  /**
+   * Point the widths at a different fish, for the fight a cast has just started.
+   *
+   * Nothing is destroyed or created: the pool is already big enough for any fish
+   * in the game, and only which pattern a shot's width is read from changes.
+   *
+   * Shots still on screen from the previous fight are not the caller's problem
+   * here — `FightScene` hides them the moment a fight ends, and a fresh fight
+   * opens with an empty list.
+   */
+  setFish(fish: FishDefinition): void {
+    this.fish = fish;
   }
 
   /**
@@ -71,6 +102,14 @@ export class Projectiles {
       if (shot === undefined) {
         rectangle.setVisible(false);
         return;
+      }
+
+      // Thrown rather than skipped, for the reason `patternById` gives: a shot
+      // exists only inside a fight, and a fight only exists after a cast has set
+      // the fish, so reaching here without one is a fault in the scene's own
+      // ordering and should surface the first time it happens.
+      if (this.fish === null) {
+        throw new Error('a shot was drawn before a cast set the fish');
       }
 
       const pattern = volleyPatternById(this.fish, shot.patternId);

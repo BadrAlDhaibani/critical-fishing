@@ -15,59 +15,64 @@ Update this block at the end of every batch. Keep it to a few lines.
 - **Current phase: 4, the loop around the fight. Phases 1, 2 and 3 are all
   closed**, apart from task 1.2c, which is still open and still not
   gameplay-blocking.
-- **Last completed task:** 3.5, weighted attack selection, added after phase 3
-  had already closed because open finding 3 capped every fish at `common` and
-  4.1's encounter table weights against `rarity`. Before it, 3.4 added the heavy
-  attack and 3.3 proved the content template. The fight is feature-complete as
-  design.md sections 2 and 3 describe it: two player attacks, a dash, four fish,
-  two attack shapes, bands with hysteresis, win and lose states.
-- **3.5 in one line:** `sim/rng.ts` (mulberry32, `nextRandom(seed) -> {value,
-  seed}`), `FightState.rngSeed` threaded through `stepFight` → `stepFishAttack` →
-  `attackForBand`, real entropy injected in `FightScene` and nowhere else in
-  `sim/`. It **changed no behaviour**: a one-attack band short-circuits without
-  spending a roll, and every fish is still `common`, so no shipped fight rolls
-  anything. Three judgement calls behind it are in decisions.md 2026-09-07 and
-  the third is the one that will surprise you — **weights describe what a fish
-  prefers, not the split you will observe**, because a fish that draws a melee
-  column out of reach re-draws next tick.
-- **Next task:** 4.1, the cast and encounter roll. _Context: design.md section 5,
-  architecture.md section 6._ **Read both before starting — this is a different
-  phase and neither doc has been read recently.** Three things to know going in:
-  - design.md section 5 is emphatic that **casting must not be a slot machine**.
-    Pre-cast decisions shift the encounter table readably. 4.1 is explicitly the
-    version *without* those modifiers (they are 4.7), so build the table so
-    4.7 can shift it rather than replacing it.
-  - **The encounter weights are an open question in design.md section 8. Ask
-    Badr, do not invent them.** Same for anything in the economy at 4.2.
-  - `ALL_FISH` in `data/fish/index.ts` is the registry 4.1 rolls against, and
-    `createFightState(fish, seed)` already takes both. **The known debt is in
-    the renderer, not the sim**: see point 4 under "The fish format" below.
-    `game/scenes/fishPicker.ts` is the debug stand-in for this roll and shows
-    what a fish swap currently costs.
-  - **Decide where the encounter roll's randomness comes from.** 3.5 built a
-    seeded PRNG, but the determinism rule it satisfies is `sim/`'s, and the
-    encounter roll belongs in `meta/`. `sim/rng.ts` is reusable there and
-    `Math.random` is legal there; picking deliberately beats drifting into one.
-- **Every fish is still `common`, but nothing is stopping that any more.** 3.5
-  closed open finding 3, so uncommon and rare are pure data and finding 2 is
-  waiting only on a design yes. Boss still needs a `phases` field nothing
-  implements. If 4.1 wants a rarity axis worth weighting, that yes is the input.
+- **Last completed task:** 4.1, the cast and encounter roll — the first task
+  outside the fight itself, and the first file in `meta/`. Before it, 3.5 added
+  the weighted attack roll, 3.4 the heavy attack and 3.3 the three extra fish.
+  The fight is feature-complete as design.md sections 2 and 3 describe it, and
+  there is now a loop around it that starts and restarts fights.
+- **4.1 in one line:** `data/encounters.ts` holds a per-fish weighted table (grey
+  box 4, perch 3, carp 2, gar 1), `meta/encounter.ts` rolls it with an injectable
+  `Math.random`, and `FightScene` now opens on a cast prompt with no fight at all
+  — `driver` is null until `R` is pressed. **Four decisions in it were Badr's**,
+  all in decisions.md 2026-09-07: the table shape and its weights, a cast beat
+  inside `FightScene` rather than a separate scene, `Math.random` in `meta/`
+  rather than `sim/rng.ts`, and `?fish=` pinning every cast.
+- **The thing most likely to surprise you: an ending *is* the cast prompt.**
+  There is no step back to a waiting screen between a fight ending and the next
+  cast. `R` casts from an ending directly, which is one press, exactly what the
+  restart key did before. The `waitingToCast` state is only where the game opens,
+  and nothing ever returns to it.
+- **Next task:** 4.2, reward on win. _Context: design.md section 5,
+  architecture.md section 6 — both read in full during 4.1._ Two things going in:
+  - **The economy is an open question in design.md section 8. Ask Badr, do not
+    invent it.** Currency, sale values, upgrade costs and material drop rates are
+    all named there. 4.1 asked about its weights the same way and it was the
+    right call: the answers were not what an invented table would have been.
+  - There is no storage until 4.6 and no backend until phase 5, so a reward at
+    4.2 is a number the session holds. Write it so 4.6 can put it behind the
+    storage interface rather than having to unpick it.
+- **The renderer no longer reads a fish definition at construction.** That was
+  3.3's debt and 4.1 paid it: `FightScene.cast` is the one place a fish reaches
+  the renderer. Anything new that sizes itself off the definition has to be told
+  there too, or it will draw the first fish of the session forever.
+- **Every fish is still `common`, and the table cannot yet say otherwise.** 3.5
+  closed open finding 3, so uncommon and rare are pure data and finding 2 waits
+  only on a design yes. Boss still needs a `phases` field nothing implements. The
+  encounter table weights **per fish**, deliberately, so it does not need that
+  yes — but `rarity` is what 4.7's modifiers are expected to key on.
 - **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
   two of the three effects design.md section 6 warns **hide bad timing**. Badr's
   deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
   reading as unfair or mushy, suspect the phase 1 tuning before the effects
   layer, and see `GAME_PACE` below.
-- **In a half state:** nothing. 3.4 was committed as `677d596` during the 3.5
-  batch; 3.5's own work was uncommitted at the end of it, awaiting the playtest.
+- **In a half state:** nothing. 3.5 was already committed as `7dce67e` before
+  this batch opened; 4.1's own work is uncommitted, awaiting the playtest.
 - **Awaiting a yes:** four proposed edits to architecture.md, listed under open
   finding 9. Two are from phase 1 and two from 3.1; none has been written, since
-  architecture.md is Firm tier. 3.5 adds a fifth candidate rather than a proposal:
-  section 2's layout does not list `sim/rng.ts`, which now exists.
-- **Proposed but not written:** three additions to `patterns.md` — commitment
-  counters, silent all-or-nothing refusals, and "prove a validation rule by
-  breaking it". The first two hit three uses at 3.4; the third reached a fourth
-  use at 3.5 and has caught something every time. All shown in their batch
-  reports and none approved.
+  architecture.md is Firm tier. 3.5 and 4.1 add two more candidates rather than
+  proposals: section 2's layout lists neither `sim/rng.ts` nor anything under
+  `meta/`, both of which now exist. Section 6 already describes `meta/` in prose,
+  so it is only the layout block that is out of date.
+- **One decisions.md entry is proposed and unwritten**: 4.1's, covering the four
+  approved decisions above plus the canvas-text call behind the cast prompt.
+  Shown in the 4.1 batch report. It is the only record of why the encounter roll
+  does not use `sim/rng.ts`, so write it as soon as Badr says yes.
+- **Proposed but not written:** four additions to `patterns.md` — commitment
+  counters, silent all-or-nothing refusals, "prove a validation rule by breaking
+  it", and, new at 4.1, "wall-clock milliseconds, unpaced, `MAX_FRAME_MS`
+  clamped", which reached its third use in `castPrompt.ts`. The first two hit
+  three uses at 3.4; the third has now been applied five times and has caught
+  something every time. All shown in their batch reports and none approved.
 
 ### The fish format
 
@@ -112,18 +117,20 @@ Four things worth knowing before touching it:
    instance every tick. A projectile carries `patternId` for the same reason.
 4. **The renderer reads it too**, which is the half that would have been missed.
    `telegraph.ts` draws the column at the pattern's own `hitboxWidth` and the
-   outline at the fish's own size; `projectiles.ts` sizes its pool and its
-   rectangles off the definition. A telegraph at another fish's size is a promise
-   the game cannot keep. **Two of those readings happen once, at construction**:
-   the fish rectangle in `FightScene.create` and the shot pool in
-   `projectiles.ts`. That is why 3.3's fish picker reloads the page rather than
-   swapping the fish live, and it is a real debt that **comes due at phase 4.1**,
-   when the encounter roll wants to hand `startFight` a different fish
-   mid-session. See decisions.md 2026-08-21.
+   outline at the fish's own size; `projectiles.ts` sizes its rectangles off the
+   definition. A telegraph at another fish's size is a promise the game cannot
+   keep. Two of those readings used to happen once, at construction, which is why
+   3.3's picker reloaded the page rather than swapping the fish live. **4.1 paid
+   that off and nothing reads the definition at construction any more**: the fish
+   rectangle is `setSize`d per cast, and the shot pool is sized to the largest
+   volley in `ALL_FISH` so `Projectiles.setFish` only repoints the widths.
+   `FightScene.cast` is the single place both happen. See decisions.md
+   2026-08-21 and 2026-09-07.
 
-**Playing a fish that is not the grey box:** `game/scenes/fishPicker.ts`, DOM
-buttons at the bottom right above the cue audition row, or `?fish=<id>` in the
-URL directly. Debug tooling, and a stand-in for phase 4.1's encounter roll.
+**Playing one fish rather than rolling for one:** `game/scenes/fishPicker.ts`,
+DOM buttons at the bottom right above the cue audition row, or `?fish=<id>` in
+the URL directly. Since 4.1 it is a debug **override of the encounter roll**: the
+parameter pins every cast in the session, and with no parameter every cast rolls.
 
 What stayed in `data/config.ts` is stated in that file's header, with the test to
 apply before adding a constant: **could two fish disagree about it?** If they
@@ -280,6 +287,23 @@ Most are pinned by tests and will fail the suite. These three are the traps.
    must stop the refill entirely — the exchange the fight is built on) and
    `DASH_DURATION_TICKS < LINE_REGEN_DELAY_TICKS`.
 
+### Where the loop lives
+
+Everything outside the fight. Added at 4.1 and expected to grow all phase.
+
+`data/encounters.ts` is the table and `meta/encounter.ts` is the roll over it,
+which is the same data-and-logic split `data/fish/` and `sim/ai/` have. **`meta/`
+is where `Math.random` is allowed and `sim/rng.ts` is not used**: the determinism
+rule belongs to `sim/`, which replays on the phase 7 server, and a cast has
+nothing to replay. `rollEncounter` takes its randomness as a parameter so a test
+can drive the boundaries exactly, which is the whole of how it is tested.
+
+`FightScene` owns the beat itself: `cast()` rolls, tells the renderer which fish
+it is drawing, and calls `startFight(fish)`. `game/render/castPrompt.ts` is the
+words, in the DOM, and is the first **in-game** UI outside the canvas — a
+placeholder until phase 8.1 has a bitmap font, for the reason the 2026-08-19
+decision gives about canvas text under a nearest-neighbour upscale.
+
 ### Where the fight lives
 
 `sim/fight.ts` steps everything; `sim/ai/patterns.ts` runs the attacks and
@@ -334,10 +358,10 @@ precisely because nothing simulates.
    architecture.md section 4 sketches and nothing implements. Two things this
    left behind rather than settled, both in decisions.md: a fish that draws an
    attack it cannot reach with re-draws next tick, so **weights describe what a
-   fish prefers rather than the split you will observe**; and `rngSeed` is
-   currently spent by nothing else, so 4.1's encounter roll has to decide whether
-   it wants this stream, its own, or `Math.random` in `meta/` — the determinism
-   rule is `sim/`'s, and the encounter roll is not in `sim/`.
+   fish prefers rather than the split you will observe**; and `rngSeed` is still
+   spent by nothing else. 4.1 answered the second by **not** using it — the
+   encounter roll is `Math.random` in `meta/`, since the determinism rule is
+   `sim/`'s and a cast has nothing to replay.
 4. **Depth variety beyond two resting stations.** design.md section 3 already
    names "drifts shallow when low on resistance". Phase 3.
 5. **`stepFight` reads as six stacked concerns** and names eighteen fields plus a
@@ -391,7 +415,14 @@ precisely because nothing simulates.
   all 198 tests survived `GAME_PACE` with no edits, why 3.1 changed imports
   rather than assertions, and why 3.5 changed call signatures and not one
   assertion. Since 3.1 the fish half of that data is read off `GREY_BOX` and its
-  patterns rather than off `config.ts`. Keep it that way. 310 tests as of 3.5.
+  patterns rather than off `config.ts`. Keep it that way. 328 tests as of 4.1,
+  which added 18 and changed none: the cast beat is all `game/` and `meta/`, and
+  nothing in `sim/` moved.
+- **`tests/encounter.test.ts` drives the roll against a fixture table, not the
+  shipped one**, for the reason `DUMMY` exists: a test written against 4/3/2/1
+  passes for two reasons at once and stops testing the walk the moment the table
+  is retuned. The fixture's weights are 1/2/3/4, so every cumulative boundary is
+  an exact tenth and can be asserted from both sides without rounding.
 - **The roll needs a fish shape no registered fish has.** Every fish in
   `ALL_FISH` is `common`, one attack per band, so nothing shipped rolls at all
   and any test of weighted selection written against a real fish passes
@@ -584,7 +615,13 @@ At the end of this phase there is a complete game playable in one browser tab,
 shareable as a static link. **Get it in front of friends here.** Early feedback
 on the fight is worth more than anything in phases 5 to 7.
 
-- [ ] **4.1 Cast and encounter roll.** Weighted table, no pre-cast modifiers yet.
+- [x] **4.1 Cast and encounter roll.** Closed 2026-09-07. `data/encounters.ts` is
+      a per-fish weighted table, `meta/encounter.ts` rolls it with `Math.random`,
+      and `FightScene` opens on a cast prompt rather than on a fight. Four
+      decisions in it were Badr's and are in decisions.md 2026-09-07. It also
+      paid off the construction-time renderer debt 3.3 left behind, which is what
+      lets a cast hand a running scene a different fish. No pre-cast modifiers:
+      those are 4.7.
 - [ ] **4.2 Reward on win.** Currency and materials.
 - [ ] **4.3 Record book.** Catches and escapes, escapes as silhouettes.
 - [ ] **4.4 Loss cost.** Bait consumed, rod durability damaged.
