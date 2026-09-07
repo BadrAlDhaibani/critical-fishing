@@ -12,31 +12,42 @@ genuinely need more mid-task.
 
 Update this block at the end of every batch. Keep it to a few lines.
 
-- **Current phase:** 3, prove the content template.
-- **Last completed task:** 3.3, three fish by data alone. **The template passed
-  its test**: `duellingPerch.ts`, `managerialCarp.ts` and `deadeyeGar.ts` plus one
-  line in the registry, with no engine change of any kind. It also added
-  `game/scenes/fishPicker.ts`, because nothing could fight a fish that was not the
-  grey box. 3.1 and 3.2 before it built the format and its validation test. Phase
-  1 is complete apart from 1.2c, still open and still not gameplay-blocking.
-- **Next task:** 3.4, the heavy attack. _Context: design.md section 2,
-  architecture.md section 4._ **Two things must come from Badr before it can be
-  built:** its stamina cost and damage are named in design.md section 8's open
-  questions, so they are asked for rather than invented, and its key binding is a
-  design proposal rather than a convenience — see the header of
-  `game/input/keyboard.ts`. Note it is a *player* attack: it touches
-  `data/config.ts`, `sim/`, and the input layer, and none of the fish work.
-- **Read open finding 3 before planning any more content.** 3.3's finding is that
-  the rarity ladder stops at common until the weighted roll exists. It is now
-  gating content rather than being a gap in attack selection, and it also blocks
-  finding 2. Worth scheduling before any fish above common is attempted.
+- **Current phase: 4, the loop around the fight. Phases 1, 2 and 3 are all
+  closed**, apart from task 1.2c, which is still open and still not
+  gameplay-blocking.
+- **Last completed task:** 3.4, the heavy attack, which closed phase 3. Before it,
+  3.3 proved the content template by adding three fish as data alone. The fight
+  itself is now feature-complete as design.md sections 2 and 3 describe it: two
+  player attacks, a dash, four fish, two attack shapes, bands with hysteresis,
+  win and lose states.
+- **Next task:** 4.1, the cast and encounter roll. _Context: design.md section 5,
+  architecture.md section 6._ **Read both before starting — this is a different
+  phase and neither doc has been read recently.** Three things to know going in:
+  - design.md section 5 is emphatic that **casting must not be a slot machine**.
+    Pre-cast decisions shift the encounter table readably. 4.1 is explicitly the
+    version *without* those modifiers (they are 4.7), so build the table so
+    4.7 can shift it rather than replacing it.
+  - **The encounter weights are an open question in design.md section 8. Ask
+    Badr, do not invent them.** Same for anything in the economy at 4.2.
+  - `ALL_FISH` in `data/fish/index.ts` is the registry 4.1 rolls against, and
+    `createFightState(fish)` already takes a definition. **The known debt is in
+    the renderer, not the sim**: see point 4 under "The fish format" below.
+    `game/scenes/fishPicker.ts` is the debug stand-in for this roll and shows
+    what a fish swap currently costs.
+- **Open finding 3 caps every fish at `common`** and is the first thing to
+  schedule if phase 4 wants variety in its encounter table. It also blocks finding
+  2. This is phase 3's parting finding and it is not fixed.
 - **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
   two of the three effects design.md section 6 warns **hide bad timing**. Badr's
   deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
   reading as unfair or mushy, suspect the phase 1 tuning before the effects
   layer, and see `GAME_PACE` below.
-- **In a half state:** nothing. **Awaiting a yes:** two proposed edits to
-  architecture.md section 4, listed under open finding 9.
+- **In a half state:** nothing. **Awaiting a yes:** four proposed edits to
+  architecture.md, listed under open finding 9. Two are from phase 1 and two from
+  3.1; none has been written, since architecture.md is Firm tier.
+- **Proposed but not written:** two additions to `patterns.md`, for commitment
+  counters and for silent all-or-nothing refusals. Both hit three uses at 3.4.
+  Shown in that batch's report and not yet approved.
 
 ### The fish format
 
@@ -210,6 +221,14 @@ them has been through a tuning pass of its own.
   full pool.
 - Basic attack: costs 8, 20-tick cooldown, 20 damage at 100 units falling to a
   floor of 6 on a true inverse curve. Ten attacks from a full pool.
+- Heavy attack: costs 20, 24-tick wind-up, 28-tick cooldown **shared with the
+  basic**, and 3x the basic's curve at every distance — 60 at full range, floor
+  18. Four from a full pool. Bound to `F`. It **commits**: the boat is rooted from
+  the press until the tick it lands, cannot dash out, and the damage is priced at
+  the line length when the wind-up *ends*, so a fish that dives away during it has
+  answered the attack. **24 is the number most likely to move**, and the read it
+  is built around is that you can heavy into the carp's 55-tick slam and survive
+  but not into the perch's 28-tick jab.
 - Stamina refill 6 a second, paused 30 ticks by any spend.
 - Close punisher: 34 wind-up, 8 active, 45 recovery, 40 cooldown, 25 hull damage,
   60-unit hitbox centred on the fish. Four of them end a fight.
@@ -256,6 +275,14 @@ The order inside `stepFight` is load bearing and not obvious: the band is read
 against the fish's position at the **top** of the tick, because repositioning
 needs a band first; the player's damage is then priced against the position the
 fish has **just** moved to. Several tests are exact about it.
+
+3.4 added one more ordering constraint. **The attack cooldown is decremented at
+the very top of the function, before any movement**, because the heavy shares it
+and whether the boat is rooted has to be known before the movement block runs —
+being rooted changes what movement *means*. The basic attack still spends that
+same counter further down, where its damage is priced. Both player attacks
+resolve after `stepReposition`, so both are priced against the fish's new
+position; the heavy's is the whole reason a fish can dodge it by diving.
 
 `stepFight` rebuilds **both** `boat` and `fish` from scratch every tick, so every
 new field has to be named there or it vanishes after one tick. Both are guarded
@@ -353,11 +380,24 @@ precisely because nothing simulates.
   did not become redundant when they landed: they are all legal, and the point of
   this one is that it is not. It is **not** in `ALL_FISH` and must not be: `tests/fish.test.ts` validates the
   registry, and a fixture chosen to be strange is not a fish that has to be legal.
+- **A test that prices damage must sit outside the clamp, and against a fish that
+  moves.** This cost two wrong tests at 3.4 and neither failed anything. The
+  damage curve is flat inside `ATTACK_FULL_DAMAGE_RANGE`, so a test set up in the
+  close band deals identical damage at genuinely different lengths — an
+  implementation resolving the heavy attack on entirely the wrong tick still
+  passed. And a fish holding station makes every tick of a wind-up look the same,
+  so the timing cannot be observed at all. `closingFish()` in `fight.test.ts` is
+  the fixture that is both things, and its docstring says so. Note `quietFish()`
+  deliberately is **not**: it exists to hold the fish still.
 - **A validation test that cannot fail is worth nothing.** Every rule in
   `tests/fish.test.ts` was checked by dropping a deliberately broken fish into
   `data/fish/`, watching it fail, and deleting it. Do the same for any rule added
   there — several of these rules pass vacuously against a single well-formed fish,
   which is exactly the state the suite is in most of the time.
+- **The same discipline has now been applied three times** — 3.2's broken fish,
+  3.3's four one-at-a-time breaks, 3.4's five. It is the house rule for anything
+  asserting a rule rather than a value, and it has caught something every time.
+  Proposed for `patterns.md`; see the report for 3.4.
 
 ---
 
@@ -484,7 +524,16 @@ _Context for all of phase 2: design.md section 6._
       field, no third `behaviour`, no `sim/` change. Added the fish picker so the
       three could be played at all. The finding is that the rarity ladder stops
       at common until open finding 3 lands — see below and decisions.md.
-- [ ] **3.4 Heavy attack.** Second player attack, higher cost and damage.
+- [x] **3.4 Heavy attack.** Closed 2026-08-21. **It commits**: pressing `F` roots
+      the boat for a wind-up and the hit lands regardless, which is design.md
+      section 3's rule pointed back at the player. Shape, values and the two
+      rejected alternatives are in decisions.md 2026-08-21. design.md section 2's
+      control scheme is now complete — one basic, one heavy, and nothing else.
+
+**Phase 3 is closed.** The content template was proved by 3.3 and the player's
+moveset finished by 3.4. The one thing the phase surfaced and did not fix is open
+finding 3, which caps every fish at `common`; it is the first thing to schedule
+if phase 4 wants variety in the encounter table.
 
 _Context: architecture.md section 4, design.md sections 2 and 3._
 

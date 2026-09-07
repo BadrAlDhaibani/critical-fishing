@@ -3,7 +3,7 @@ import { stepFight, BOAT_MIN_X, BOAT_MAX_X } from '../src/sim/fight.ts';
 import { createFightState, noInputs } from '../src/sim/state.ts';
 import type { FightInputs, FightState } from '../src/sim/state.ts';
 import { FixedStepDriver, TICK_MS } from '../src/sim/loop.ts';
-import { basicAttackDamage } from '../src/sim/damage.ts';
+import { basicAttackDamage, heavyAttackDamage } from '../src/sim/damage.ts';
 import { lineLength } from '../src/sim/distance.ts';
 import { meleeReach } from '../src/sim/ai/patterns.ts';
 import {
@@ -16,6 +16,9 @@ import {
   DASH_LINE_COST,
   DEFAULT_HULL_MAX,
   DEFAULT_LINE_MAX,
+  HEAVY_COOLDOWN_TICKS,
+  HEAVY_LINE_COST,
+  HEAVY_WINDUP_TICKS,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_SECOND,
@@ -51,6 +54,9 @@ const DASH_LEFT: FightInputs = { ...LEFT, dash: true };
 const DASH_NEUTRAL: FightInputs = { ...noInputs(), dash: true };
 
 const ATTACK: FightInputs = { ...noInputs(), attack: true };
+
+const HEAVY: FightInputs = { ...noInputs(), heavy: true };
+const HEAVY_RIGHT: FightInputs = { ...HEAVY, moveRight: true };
 
 /** Run n ticks of one held input. */
 function hold(state: FightState, inputs: FightInputs, n: number): FightState {
@@ -694,7 +700,9 @@ describe('stepFight: the pool refills', () => {
       for (const moveRight of [false, true]) {
         for (const dash of [false, true]) {
           for (const attack of [false, true]) {
-            combinations.push({ moveLeft, moveRight, dash, attack });
+            for (const heavy of [false, true]) {
+              combinations.push({ moveLeft, moveRight, dash, attack, heavy });
+            }
           }
         }
       }
@@ -1361,5 +1369,205 @@ describe('stepFight: ending the fight', () => {
     const after = hold(lost, noInputs(), 10);
 
     expect(after.tick).toBe(lost.tick + 10);
+  });
+});
+
+/**
+ * The heavy attack. Task 3.4.
+ *
+ * design.md section 2's second and last player attack, and the one that commits:
+ * pressing it roots the boat for a wind-up and then the hit lands regardless. The
+ * tests below are mostly about that commitment, because it is the whole design —
+ * an instant heavy would need none of them.
+ *
+ * Timing worth stating once. The press tick loads `heavyWindUpRemaining` with
+ * HEAVY_WINDUP_TICKS, and the counter reaches zero exactly HEAVY_WINDUP_TICKS
+ * ticks later, which is the tick the damage lands. The boat is rooted for the
+ * press tick and all of them, so 1 + HEAVY_WINDUP_TICKS ticks of standing still.
+ */
+describe('the heavy attack', () => {
+  /**
+   * A quiet fish that is closing and rising, at a range where the curve is live.
+   *
+   * Two properties, and a test that wants to know **which tick** an attack
+   * resolved on needs both. The fish has to be moving, or every tick of the
+   * wind-up looks the same. And the line has to stay outside
+   * ATTACK_FULL_DAMAGE_RANGE, or the curve is clamped flat and two genuinely
+   * different lengths deal identical damage — which does not fail anything, it
+   * just quietly stops the test from being able to.
+   *
+   * That second one cost a wrong version of these tests. A fish parked at the
+   * close band's resting depth is well inside the clamp, so an implementation
+   * resolving the heavy on entirely the wrong tick still passed.
+   *
+   * The fish's own opening position is already both things; only the band is
+   * overridden, which is what makes it approach and rise rather than hold
+   * station. The opening line of 141 sits inside the hysteresis margin, so
+   * `bandFor` keeps whatever band it is handed.
+   */
+  function closingFish(): FightState {
+    const start = quietFish();
+
+    return { ...start, fish: { ...start.fish, band: 'close' } };
+  }
+
+  it('charges the cost at the press and deals nothing yet', () => {
+    const start = quietFish();
+    const pressed = stepFight(start, HEAVY);
+
+    expect(pressed.boat.line).toBeCloseTo(start.boat.line - HEAVY_LINE_COST);
+    expect(pressed.boat.heavyWindUpRemaining).toBe(HEAVY_WINDUP_TICKS);
+    // The whole point of the wind-up: the pool is gone and nothing has happened.
+    expect(pressed.fish.resistance).toBe(start.fish.resistance);
+  });
+
+  it('lands exactly HEAVY_WINDUP_TICKS after the press', () => {
+    const start = quietFish();
+    const pressed = stepFight(start, HEAVY);
+
+    const justBefore = hold(pressed, noInputs(), HEAVY_WINDUP_TICKS - 1);
+    expect(justBefore.fish.resistance).toBe(start.fish.resistance);
+    expect(justBefore.boat.heavyWindUpRemaining).toBe(1);
+
+    const landed = stepFight(justBefore, noInputs());
+    expect(landed.fish.resistance).toBeLessThan(start.fish.resistance);
+    expect(landed.boat.heavyWindUpRemaining).toBe(0);
+  });
+
+  it('resolves identically whether the key is held or released', () => {
+    // Commitment, and the reason the fish's wind-up rule is quoted at the player.
+    // Once the press is made, what the key does afterwards is not information the
+    // attack uses — so the two runs below have to be indistinguishable.
+    //
+    // Asserted as an equality rather than as "it still lands after a release",
+    // which is the weaker version: an implementation that cancelled the wind-up
+    // by resolving it *early* passes that one and fails this.
+    //
+    // Against a **moving** fish, deliberately. The far-band fish `quietFish`
+    // gives holds perfectly still, so an early resolve there deals exactly the
+    // damage a late one would and the equality below cannot see the difference.
+    // The close band is where resolving on the wrong tick shows up as a number.
+    const start = closingFish();
+    const pressed = stepFight(start, HEAVY);
+
+    const released = hold(pressed, noInputs(), HEAVY_WINDUP_TICKS);
+    const heldDown = hold(pressed, HEAVY, HEAVY_WINDUP_TICKS);
+
+    expect(released.fish.resistance).toBeLessThan(start.fish.resistance);
+    expect(heldDown.fish.resistance).toBe(released.fish.resistance);
+  });
+
+  it('deals the heavy curve, priced where the fish is when it lands', () => {
+    const start = closingFish();
+    const pressed = stepFight(start, HEAVY);
+    const justBefore = hold(pressed, noInputs(), HEAVY_WINDUP_TICKS - 1);
+    const landed = stepFight(justBefore, noInputs());
+
+    const dealt = justBefore.fish.resistance - landed.fish.resistance;
+
+    // Measured off the state the tick resolved to, not the one it was started
+    // from. The fish has closed during the wind-up, so the two differ, and this
+    // is what makes a fish diving away a real answer to the attack.
+    expect(dealt).toBe(heavyAttackDamage(lineLength(landed.boat, landed.fish)));
+    // Not a vacuous version of the above: the fish really did move.
+    expect(landed.fish.x).not.toBe(start.fish.x);
+  });
+
+  it('roots the boat from the press until the tick it lands', () => {
+    const start = quietFish();
+    const pressed = stepFight(start, HEAVY_RIGHT);
+
+    // Rooted on the press tick itself, so the input and the boat stopping are
+    // the same frame rather than one apart.
+    expect(pressed.boat.x).toBe(start.boat.x);
+
+    // Held rightwards for the whole wind-up, including the tick it lands on.
+    const landed = hold(pressed, RIGHT, HEAVY_WINDUP_TICKS);
+    expect(landed.boat.x).toBe(start.boat.x);
+
+    // And free again on the very next one.
+    expect(stepFight(landed, RIGHT).boat.x).toBeGreaterThan(start.boat.x);
+  });
+
+  it('cannot be dashed out of', () => {
+    const start = quietFish();
+    const pressed = stepFight(start, HEAVY);
+    const during = hold(pressed, DASH_RIGHT, HEAVY_WINDUP_TICKS - 1);
+
+    // Neither the distance nor the cost: a refused dash is silent and free.
+    expect(during.boat.x).toBe(start.boat.x);
+    expect(during.boat.dashTicksRemaining).toBe(0);
+    // The refill is still paused by the heavy's own spend over this stretch, so
+    // an unchanged pool here means the dash was never charged.
+    expect(during.boat.line).toBeCloseTo(pressed.boat.line);
+  });
+
+  it('cannot be started during a dash', () => {
+    const start = quietFish();
+    const dashing = stepFight(start, DASH_RIGHT);
+
+    const tried = stepFight(dashing, HEAVY);
+
+    expect(tried.boat.heavyWindUpRemaining).toBe(0);
+    // Refused silently and for free, like every other refusal in the fight.
+    expect(tried.boat.line).toBeCloseTo(dashing.boat.line);
+  });
+
+  it('shares its cooldown with the basic attack, in both directions', () => {
+    const start = quietFish();
+
+    // A basic just fired blocks a heavy.
+    const afterBasic = stepFight(start, ATTACK);
+    const heavyTried = stepFight(afterBasic, HEAVY);
+    expect(heavyTried.boat.heavyWindUpRemaining).toBe(0);
+
+    // And a heavy just fired blocks a basic, for longer than its wind-up runs.
+    const afterHeavy = stepFight(start, HEAVY);
+    const basicTried = hold(afterHeavy, ATTACK, HEAVY_WINDUP_TICKS);
+    expect(basicTried.boat.attackCooldownRemaining).toBeGreaterThan(0);
+  });
+
+  it('is refused, silently and for free, on too little line', () => {
+    const start = quietFish();
+    const poor: FightState = {
+      ...start,
+      boat: { ...start.boat, line: HEAVY_LINE_COST - 1 },
+    };
+
+    const tried = stepFight(poor, HEAVY);
+
+    expect(tried.boat.heavyWindUpRemaining).toBe(0);
+    expect(tried.fish.resistance).toBe(poor.fish.resistance);
+    // All or nothing. A pool that cannot pay the whole cost fires nothing rather
+    // than a weaker hit, the same as the dash and the basic attack.
+    expect(tried.boat.line).toBeGreaterThanOrEqual(poor.boat.line);
+  });
+
+  it('does not repeat while the key is held down', () => {
+    const start = quietFish();
+
+    // Long enough to cover the wind-up and the whole cooldown after it.
+    const held = hold(start, HEAVY, HEAVY_WINDUP_TICKS + HEAVY_COOLDOWN_TICKS + 5);
+
+    // Exactly one heavy was ever charged over a stretch long enough for a second
+    // to have fired, so the floor is one cost down and no more. A second would
+    // put it at two costs down, which is what this would catch.
+    expect(held.boat.heavyWindUpRemaining).toBe(0);
+    expect(
+      lowestLine(start, HEAVY, HEAVY_WINDUP_TICKS + HEAVY_COOLDOWN_TICKS + 5),
+    ).toBeCloseTo(DEFAULT_LINE_MAX - HEAVY_LINE_COST);
+  });
+
+  it('costs enough that a full pool holds four of them', () => {
+    // Priced against the default loadout rather than being a free-standing
+    // number, the same way the basic's ten and the dash's five are.
+    expect(Math.floor(DEFAULT_LINE_MAX / HEAVY_LINE_COST)).toBe(4);
+  });
+
+  it('keeps the refill stopped while it is being used at full cadence', () => {
+    // Roadmap invariant 3, which had no test for the basic attack either. The
+    // exchange the whole fight is built on: attacking flat out means the pool
+    // never recovers, so recovering is something you disengage to do.
+    expect(HEAVY_COOLDOWN_TICKS).toBeLessThan(LINE_REGEN_DELAY_TICKS);
   });
 });

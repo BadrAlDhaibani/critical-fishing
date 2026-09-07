@@ -194,6 +194,65 @@ export const ATTACK_LINE_COST = 8;
 export const ATTACK_COOLDOWN_TICKS = ticksAtPace(20);
 
 /**
+ * The heavy attack. Chosen 2026-08-21, see decisions.md.
+ *
+ * design.md section 2 asks for exactly one basic and one heavy attack and says
+ * nothing else about the second one, so its shape was an open design question.
+ * The answer is that **it commits**: pressing it roots the boat for a wind-up and
+ * then the hit lands. That is design.md section 3's rule pointed back at the
+ * player — the fish cannot cancel a wind-up and now neither can you, so being
+ * rooted when a telegraph starts is a misread you cannot walk out of.
+ *
+ * Rejected: an instant heavy that is the basic with larger numbers, which is
+ * strictly better whenever the pool can afford it and turns the choice into a
+ * resource check rather than a read.
+ *
+ * The cost is charged at the press and the damage resolves at the **end** of the
+ * wind-up, priced at the line length at that moment. So a fish that dives away
+ * mid-wind-up costs you damage without having to do anything about the attack,
+ * which is the distance coupling in design.md section 2 working on the fish's
+ * side of the line for the first time.
+ *
+ * 20 is four heavies from a full default pool of 80, against ten basics at 8.
+ *
+ * **24 ticks of wind-up is the number most likely to move at the playtest.** It
+ * is deliberately shorter than the shortest fish tell in the game, the duelling
+ * perch's 28, and the asymmetry that creates is the whole read: against the
+ * managerial carp's 55-tick slam you can start a heavy and still clear the
+ * hitbox, and against the perch's jab you cannot. Rooted for 24 ticks is 36
+ * units of walking given up.
+ *
+ * The cooldown is loaded into the boat's existing `attackCooldownRemaining`
+ * rather than a counter of its own, so the two attacks share one. Firing a heavy
+ * therefore costs the basic's next window too, and "which do I spend this on"
+ * stays a real question. Rejected: independent cooldowns, which make the
+ * damage-optimal play an alternating rotation nobody has to think about.
+ *
+ * 28 is kept under LINE_REGEN_DELAY_TICKS of 30 for the same reason the basic's
+ * 20 is: attacking at full cadence has to stop the refill entirely, which is the
+ * exchange the whole fight is built on.
+ */
+export const HEAVY_LINE_COST = 20;
+export const HEAVY_WINDUP_TICKS = ticksAtPace(24);
+export const HEAVY_COOLDOWN_TICKS = ticksAtPace(28);
+
+/**
+ * How much harder a heavy lands than a basic at the same line length.
+ *
+ * A multiplier over the existing curve rather than a second curve, so the two
+ * attacks cannot drift apart in shape and the heavy inherits the inverse-distance
+ * coupling that design.md section 2 calls the whole fight. Both anchors scale, so
+ * a heavy is 60 at full range against the basic's 20 and 18 at the floor against
+ * its 6, and "a heavy is three basics" is exactly true at every distance.
+ *
+ * The consequence worth stating: at 3 it is 3.0 damage per point of stamina
+ * against the basic's 2.5, so landing one is genuinely the better trade. The
+ * counterweight is not efficiency but risk — the pool holds only four of them,
+ * and each one requires having judged the window safe.
+ */
+export const HEAVY_DAMAGE_MULTIPLIER = 3;
+
+/**
  * Stamina regeneration. Chosen 2026-08-19, see decisions.md.
  *
  * 6 a second refills the whole pool in 13.3 seconds and one attack's cost in
@@ -334,6 +393,25 @@ export const ENDING_TINT_ALPHA = 0.55;
  */
 export const COLOUR_REEL_IN_LINE = 0xf2e6c8;
 export const REEL_IN_LINE_WIDTH = 2;
+
+/**
+ * The tether while a heavy attack is winding up. Chosen 2026-08-21.
+ *
+ * The heavy roots the boat for 24 ticks, and 24 ticks of a boat that has stopped
+ * answering the keys is indistinguishable from a hang unless something says
+ * otherwise. The reel-in had the same problem and solved it the same way, and
+ * design.md pillar 4 makes the line the identity and asks for effects to travel
+ * along it, so the charge is drawn there rather than on the hull.
+ *
+ * **Deliberately not COLOUR_TELEGRAPH.** That colour means "the fish is about to
+ * hurt you", and a player who has learnt to read it as danger must not see it
+ * fire on their own attack. Kept clear of COLOUR_REEL_IN_LINE too, since that one
+ * means the fight is already won.
+ *
+ * Presentation only. Nothing in the simulation reads either of these.
+ */
+export const COLOUR_HEAVY_LINE = 0x6fd3e8;
+export const HEAVY_LINE_WIDTH = 2;
 
 /**
  * The telegraph. Outlined during the wind-up, filled solid while the hitbox is

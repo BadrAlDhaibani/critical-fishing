@@ -15,8 +15,10 @@ import {
   COLOUR_BAR_RESISTANCE,
   COLOUR_ENDING_ESCAPED,
   COLOUR_ENDING_LANDED,
+  COLOUR_HEAVY_LINE,
   COLOUR_REEL_IN_LINE,
   ENDING_TINT_ALPHA,
+  HEAVY_LINE_WIDTH,
   REEL_IN_LINE_WIDTH,
   BAR_WIDTH,
   BAR_HEIGHT,
@@ -372,11 +374,28 @@ export class FightScene extends Phaser.Scene {
     // about it, so the stub is drawn there. It is also the only thing moving
     // during those two seconds, and without it a frozen fight would read as a
     // hang rather than as a final run.
+    // A heavy attack roots the boat for its whole wind-up, and 24 ticks of a boat
+    // that has stopped answering the keys reads as a hang unless something says
+    // otherwise. Drawn on the line rather than on the hull because design.md
+    // pillar 4 makes the line the identity, and in its own colour rather than the
+    // telegraph's, which means the fish is about to hurt you. Off the current
+    // simulation state, not interpolated: winding up is a discrete fact.
+    //
+    // Only three states, and they cannot overlap: the reel-in freezes the fight,
+    // so nothing can be charging by the time it runs.
+    let lineWidth = 1;
+    let lineColour = COLOUR_LINE;
+
+    if (stage === 'reelIn') {
+      lineWidth = REEL_IN_LINE_WIDTH;
+      lineColour = COLOUR_REEL_IN_LINE;
+    } else if (fighting && current.boat.heavyWindUpRemaining > 0) {
+      lineWidth = HEAVY_LINE_WIDTH;
+      lineColour = COLOUR_HEAVY_LINE;
+    }
+
     this.line.clear();
-    this.line.lineStyle(
-      stage === 'reelIn' ? REEL_IN_LINE_WIDTH : 1,
-      stage === 'reelIn' ? COLOUR_REEL_IN_LINE : COLOUR_LINE,
-    );
+    this.line.lineStyle(lineWidth, lineColour);
     this.line.lineBetween(boatX, WATER_LINE_Y, fishX, fishY);
 
     // Phase off the current simulation state, position off the interpolated

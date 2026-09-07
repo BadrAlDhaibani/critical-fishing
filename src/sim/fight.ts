@@ -20,6 +20,9 @@ import {
   DASH_DURATION_TICKS,
   DASH_LINE_COST,
   DASH_SPEED_PER_TICK,
+  HEAVY_COOLDOWN_TICKS,
+  HEAVY_LINE_COST,
+  HEAVY_WINDUP_TICKS,
   INTERNAL_WIDTH,
   LINE_REGEN_DELAY_TICKS,
   LINE_REGEN_PER_TICK,
@@ -27,7 +30,7 @@ import {
 } from '../data/config.ts';
 import { stepReposition } from './ai/bands.ts';
 import { stepFishAttack, stepProjectiles } from './ai/patterns.ts';
-import { basicAttackDamage } from './damage.ts';
+import { basicAttackDamage, heavyAttackDamage } from './damage.ts';
 import { bandFor, lineLength } from './distance.ts';
 import type { FightInputs, FightStage, FightState } from './state.ts';
 
@@ -101,6 +104,58 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
 
   let { line, dashDirection, dashTicksRemaining } = state.boat;
 
+  // Both counters are decremented before any press is looked at, so a cooldown or
+  // a wind-up of exactly one tick is over by the time the next input arrives
+  // rather than swallowing it.
+  //
+  // The attack cooldown is read up here rather than beside the basic attack
+  // below, because the heavy shares it and the heavy has to be resolved before
+  // the boat moves: whether it is rooted this tick decides what movement even
+  // means. The basic still spends it further down, where the damage is priced.
+  let attackCooldownRemaining = Math.max(
+    0,
+    state.boat.attackCooldownRemaining - 1,
+  );
+  let heavyWindUpRemaining = Math.max(0, state.boat.heavyWindUpRemaining - 1);
+
+  // Whether a heavy was already under way when this tick opened, which is the
+  // question the movement below asks. Held separately from the counter because
+  // the counter is about to reach zero on the tick the attack lands, and a boat
+  // is still rooted on that tick.
+  const heavyWasWindingUp = state.boat.heavyWindUpRemaining > 0;
+
+  // A fresh press, the same edge every other action is started on.
+  const heavyPressed = inputs.heavy && !state.boat.heavyHeld;
+
+  // Every condition is a silent refusal, like the dash's. Note what is being
+  // refused and why: a heavy cannot interrupt another heavy or a dash, because
+  // all three are commitments and none of them is an escape from the others, and
+  // it cannot be started on a cooldown it shares with the basic attack.
+  //
+  // `dashTicksRemaining` is still the value the tick opened with here, which is
+  // what makes the second check mean "a dash is running". A dash finishing on
+  // this tick has already been paid for and will read as zero next tick, so the
+  // heavy can follow it immediately.
+  const heavyStarted =
+    heavyPressed &&
+    !heavyWasWindingUp &&
+    dashTicksRemaining === 0 &&
+    attackCooldownRemaining === 0 &&
+    line >= HEAVY_LINE_COST;
+
+  if (heavyStarted) {
+    // Charged at the press, not at the landing. The stamina is gone whether or
+    // not the attack goes well, and the refill delay starts now rather than in a
+    // wind-up's time, so committing is felt immediately.
+    line -= HEAVY_LINE_COST;
+    attackCooldownRemaining = HEAVY_COOLDOWN_TICKS;
+    heavyWindUpRemaining = HEAVY_WINDUP_TICKS;
+  }
+
+  // Rooted from the tick of the press rather than the one after it, so the input
+  // and the boat stopping are the same frame.
+  const rooted = heavyWasWindingUp || heavyStarted;
+
   // A fresh press, not the key being held. Holding shift would otherwise empty
   // the pool into five back-to-back dashes without another decision being made.
   const dashPressed = inputs.dash && !state.boat.dashHeld;
@@ -113,6 +168,10 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     dashTicksRemaining === 0 &&
     dashPressed &&
     direction !== 0 &&
+    // The other half of the mutual refusal above. A dash out of a heavy's
+    // wind-up would make the commitment free, and the commitment is the only
+    // thing the heavy's damage is priced against.
+    !rooted &&
     line >= DASH_LINE_COST
   ) {
     line -= DASH_LINE_COST;
@@ -137,6 +196,12 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     if (dashTicksRemaining === 0) {
       dashDirection = 0;
     }
+  } else if (rooted) {
+    // The whole of the heavy attack's risk, in one line. Steering is not ignored
+    // the way it is during a dash — it is that the boat does not move at all, so
+    // a telegraph that starts now has to be eaten. Walls are irrelevant here
+    // since nothing moves towards one.
+    x = state.boat.x;
   } else {
     x = clamp(
       state.boat.x + direction * BOAT_SPEED_PER_TICK,
@@ -156,12 +221,6 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   );
   const { x: fishX, depth } = stepReposition({ ...state.fish, band }, x);
 
-  // Counted down before the press is looked at, so a cooldown of exactly one
-  // tick is over by the time the next input arrives rather than swallowing it.
-  let attackCooldownRemaining = Math.max(
-    0,
-    state.boat.attackCooldownRemaining - 1,
-  );
   let resistance = state.fish.resistance;
 
   const attackPressed = inputs.attack && !state.boat.attackHeld;
@@ -188,6 +247,23 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
     // where the boat actually ends up and the debug readout agrees with what was
     // dealt. The fish having just risen or dived counts for the same reason.
     const damage = basicAttackDamage(lineLength({ x }, { x: fishX, depth }));
+    resistance = Math.max(0, resistance - damage);
+  }
+
+  // The heavy landing. Nothing is checked here beyond the wind-up having run out,
+  // which is what commitment means: the cost was paid at the press, and no
+  // condition since then can stop this. There is no affordability test because
+  // the pool was already charged, and no cooldown test because the cooldown was
+  // loaded at the same moment.
+  //
+  // Priced at the length this tick resolved, exactly like the basic above, and
+  // that is the whole reason to resolve it here rather than at the press. The
+  // boat has not moved — it was rooted — but the **fish** has, so a fish that
+  // dived away during the wind-up has cost the attack real damage without having
+  // had to answer it. design.md section 2's coupling, working on the fish's side
+  // of the line for the first time.
+  if (heavyWasWindingUp && heavyWindUpRemaining === 0) {
+    const damage = heavyAttackDamage(lineLength({ x }, { x: fishX, depth }));
     resistance = Math.max(0, resistance - damage);
   }
 
@@ -267,6 +343,8 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
       dashHeld: inputs.dash,
       attackCooldownRemaining,
       attackHeld: inputs.attack,
+      heavyWindUpRemaining,
+      heavyHeld: inputs.heavy,
       regenDelayRemaining,
     },
     fish: {

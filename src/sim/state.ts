@@ -89,6 +89,30 @@ export interface BoatState {
    */
   attackHeld: boolean;
   /**
+   * Ticks left in the heavy attack currently winding up, or 0 when none is.
+   *
+   * The heavy commits, the same way a dash does and the same way design.md
+   * section 3 commits the fish to a wind-up. While this is counting the boat is
+   * **rooted**: it does not walk, it cannot start a dash, and the attack lands
+   * whatever happens in the meantime. That is the risk the damage is priced
+   * against, and it is design.md pillar 3 applied to the player rather than only
+   * to the fish.
+   *
+   * There is no matching `heavyPatternId` or phase enum. The fish needs both
+   * because it has several attacks with three phases each; the boat has one
+   * heavy with one phase that matters, so a single counter says everything.
+   *
+   * The cost is already spent by the time this is non-zero, and the damage lands
+   * on the tick it reaches zero.
+   */
+  heavyWindUpRemaining: number;
+  /**
+   * Whether the heavy key was held on the previous tick. The same edge detection
+   * as `dashHeld` and `attackHeld`, in the same place for the same phase 7
+   * reason.
+   */
+  heavyHeld: boolean;
+  /**
    * Ticks until the stamina pool starts refilling again, or 0 when it is
    * already refilling. Reset in full by any spend, dash or attack.
    *
@@ -345,6 +369,15 @@ export interface FightInputs {
    * layer's and certainly not a network client's.
    */
   attack: boolean;
+  /**
+   * Whether the heavy attack key is held right now. Held state for the same
+   * reason the other three are.
+   *
+   * design.md section 2's second and last attack. The control scheme is
+   * deliberately this small, so this is the last input that gets added to this
+   * type without a design decision behind it.
+   */
+  heavy: boolean;
 }
 
 /**
@@ -391,6 +424,8 @@ export function createFightState(fish: FishDefinition = GREY_BOX): FightState {
       dashHeld: false,
       attackCooldownRemaining: 0,
       attackHeld: false,
+      heavyWindUpRemaining: 0,
+      heavyHeld: false,
       regenDelayRemaining: 0,
     },
     fish: {
@@ -414,5 +449,11 @@ export function createFightState(fish: FishDefinition = GREY_BOX): FightState {
 
 /** No input at all. Useful as a starting value and in tests. */
 export function noInputs(): FightInputs {
-  return { moveLeft: false, moveRight: false, dash: false, attack: false };
+  return {
+    moveLeft: false,
+    moveRight: false,
+    dash: false,
+    attack: false,
+    heavy: false,
+  };
 }

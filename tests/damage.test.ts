@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { basicAttackDamage } from '../src/sim/damage.ts';
+import { basicAttackDamage, heavyAttackDamage } from '../src/sim/damage.ts';
 import {
   ATTACK_DAMAGE_MAX,
   ATTACK_DAMAGE_MIN,
   ATTACK_FULL_DAMAGE_RANGE,
+  HEAVY_DAMAGE_MULTIPLIER,
   INTERNAL_WIDTH,
 } from '../src/data/config.ts';
 
@@ -63,6 +64,50 @@ describe('basicAttackDamage: the curve', () => {
   it('deals whole numbers', () => {
     for (let length = 1; length <= INTERNAL_WIDTH * 2; length++) {
       expect(Number.isInteger(basicAttackDamage(length))).toBe(true);
+    }
+  });
+});
+
+describe('heavyAttackDamage: the same curve, scaled', () => {
+  it('scales both anchors, not just the ceiling', () => {
+    // "A heavy is three basics" has to be true at the floor as well as at full
+    // range, or the two attacks converge as the boat backs off and the heavy
+    // silently stops being worth its cost at exactly the distance it is most
+    // tempting to use it from.
+    expect(heavyAttackDamage(ATTACK_FULL_DAMAGE_RANGE)).toBe(
+      ATTACK_DAMAGE_MAX * HEAVY_DAMAGE_MULTIPLIER,
+    );
+    expect(heavyAttackDamage(10_000)).toBe(
+      ATTACK_DAMAGE_MIN * HEAVY_DAMAGE_MULTIPLIER,
+    );
+  });
+
+  it('caps inside the full-damage range rather than spiking', () => {
+    expect(heavyAttackDamage(1)).toBe(
+      ATTACK_DAMAGE_MAX * HEAVY_DAMAGE_MULTIPLIER,
+    );
+  });
+
+  it('beats the basic at every distance the lane can produce', () => {
+    // The reason to accept the wind-up. If there is any range at which the basic
+    // is as good, the heavy is a trap at that range rather than a choice.
+    for (let length = 1; length <= INTERNAL_WIDTH * 2; length++) {
+      expect(heavyAttackDamage(length)).toBeGreaterThan(
+        basicAttackDamage(length),
+      );
+    }
+  });
+
+  it('keeps the inverse shape it inherited', () => {
+    const near = heavyAttackDamage(ATTACK_FULL_DAMAGE_RANGE);
+    const far = heavyAttackDamage(ATTACK_FULL_DAMAGE_RANGE * 2);
+
+    expect(far).toBe(near / 2);
+  });
+
+  it('deals whole numbers', () => {
+    for (let length = 1; length <= INTERNAL_WIDTH * 2; length++) {
+      expect(Number.isInteger(heavyAttackDamage(length))).toBe(true);
     }
   });
 });

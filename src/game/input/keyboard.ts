@@ -12,15 +12,21 @@ import type { FightInputs } from '../../sim/state.ts';
 
 /**
  * The keys a fight listens to. design.md section 2 lists A, D, shift plus a
- * direction, and one basic and one heavy attack, so only the heavy at task 3.4
- * is still to come. The control scheme is deliberately this small, so extra
- * bindings are a design proposal rather than a convenience to add in passing.
+ * direction, and one basic and one heavy attack — **all of which now exist**, so
+ * the control scheme is complete as that section specifies it. It is deliberately
+ * this small, so any further binding is a design proposal rather than a
+ * convenience to add in passing.
  */
 export interface FightControls {
   left: Phaser.Input.Keyboard.Key;
   right: Phaser.Input.Keyboard.Key;
   dash: Phaser.Input.Keyboard.Key;
   attack: Phaser.Input.Keyboard.Key;
+  /**
+   * The heavy attack. Approved 2026-08-21 at task 3.4, see decisions.md, since
+   * this file treats a new binding as a design decision rather than a detail.
+   */
+  heavy: Phaser.Input.Keyboard.Key;
   /**
    * Start a fresh fight once this one is over. Approved 2026-08-20, because task
    * 1.13 is twenty playthroughs and reloading the page for each of them is not a
@@ -57,6 +63,11 @@ export function createFightControls(scene: Phaser.Scene): FightControls {
     // finger holds shift. Phaser captures the key by default, which also stops
     // the browser scrolling the page underneath the canvas.
     attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+    // F, under the index finger while the hand is on A and D, leaving shift for
+    // the dash and space for the basic. Close enough to be reached mid-fight,
+    // which matters because the heavy roots the boat and a fumbled reach for it
+    // is a commitment made by accident.
+    heavy: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
     // Well away from A, D, shift and space, so a hand still on the controls at
     // the moment a fight ends cannot fat-finger it. The scene ignores it while a
     // fight is running for the same reason.
@@ -78,5 +89,6 @@ export function readFightInputs(controls: FightControls): FightInputs {
     moveRight: controls.right.isDown,
     dash: controls.dash.isDown,
     attack: controls.attack.isDown,
+    heavy: controls.heavy.isDown,
   };
 }
