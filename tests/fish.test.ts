@@ -147,6 +147,25 @@ describe.each(ALL_FISH.map((fish) => [fish.id, fish] as const))(
       }
     });
 
+    it('gives every band attack a usable weight', () => {
+      // `attackForBand` divides a roll by the band's summed weight and walks the
+      // list subtracting. A zero weight is an attack that can never be drawn, a
+      // negative one lets a later entry be drawn in its place, and a band summing
+      // to zero divides by zero and picks the first entry every time. None of
+      // those throws, and all three are a fish that plays wrong rather than a
+      // fish that fails — exactly the silent data fault this file exists for.
+      //
+      // Vacuous against all four current fish, which are `common` and so have
+      // one attack per band, where the weight is never read at all. It is here
+      // for the first fish above common, which is when it starts to matter.
+      for (const band of fish.bands) {
+        for (const attack of band.attacks) {
+          expect(Number.isFinite(attack.weight)).toBe(true);
+          expect(attack.weight).toBeGreaterThan(0);
+        }
+      }
+    });
+
     it('leaves no pattern that nothing can reach', () => {
       const reachable = new Set(
         reachablePatterns(fish).map((pattern) => pattern.id),

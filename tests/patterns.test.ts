@@ -9,6 +9,7 @@ import {
 } from '../src/sim/ai/patterns.ts';
 import { createFightState } from '../src/sim/state.ts';
 import type { FishState, ProjectileState } from '../src/sim/state.ts';
+import { DEFAULT_SEED } from '../src/sim/rng.ts';
 import { BOAT_SPEED_PER_TICK, DASH_DISTANCE } from '../src/data/config.ts';
 import { GREY_BOX } from '../src/data/fish/greyBox.ts';
 import {
@@ -80,12 +81,17 @@ function run(fish: FishState, boatX: number, n: number): Run {
   let next = fish;
   let totalDamage = 0;
   let hits = 0;
+  // Threaded the way `stepFight` threads it, so a run here rolls the same way a
+  // fight does. Every fish these tests use is `common`, one attack per band, so
+  // `attackForBand` short-circuits and this never actually moves.
+  let seed = DEFAULT_SEED;
   const spawned: ProjectileState[] = [];
   const spawnTicks: number[] = [];
   const kinds = new Set<string>();
 
   for (let i = 0; i < n; i++) {
-    const result = stepFishAttack(next, boatX);
+    const result = stepFishAttack(next, boatX, seed);
+    seed = result.seed;
     next = { ...next, ...result };
     totalDamage += result.hullDamage;
     if (result.hullDamage > 0) hits++;
@@ -119,6 +125,83 @@ function fly(
 function shotAt(x: number, depth = OPENING_DEPTH, vx = 0): ProjectileState {
   return { x, depth, vx, patternId: VOLLEY.id };
 }
+
+/**
+ * A fish whose close band holds two attacks, which is the only shape that rolls
+ * at all. Nothing in `ALL_FISH` is this shape: every registered fish is `common`,
+ * one attack per band. Kept local for the same reason `fight.test.ts`'s DUMMY is.
+ */
+const TWO_ATTACK_CLOSE = {
+  ...GREY_BOX,
+  bands: [
+    {
+      ...GREY_BOX.bands[0],
+      attacks: [
+        { patternId: 'lunge', weight: 1 },
+        { patternId: 'volley', weight: 1 },
+      ],
+    },
+    GREY_BOX.bands[1],
+  ],
+};
+
+describe('stepFishAttack: when the fish rolls', () => {
+  /**
+   * The ordering decision from 3.5, and the only thing pinning it.
+   *
+   * `attackForBand` used to be called on every idle tick, because its answer
+   * feeds the melee reach check below it and that was free while it could only
+   * ever answer one thing. Now that it rolls, calling it during a cooldown would
+   * churn the stream through 45 to 90 ticks per attack to decide something the
+   * fish is not allowed to act on. The roll belongs on ticks the fish can commit.
+   *
+   * Nothing else in the suite would notice this moving: the fish still attacks
+   * on the same ticks either way, so only the seed betrays it.
+   */
+  it('does not roll while its cooldown is running', () => {
+    const onCooldown = fishAt({
+      ...IN_CLOSE_BAND,
+      definition: TWO_ATTACK_CLOSE,
+      attackCooldownRemaining: 30,
+    });
+
+    expect(stepFishAttack(onCooldown, ON_TOP, DEFAULT_SEED).seed).toBe(
+      DEFAULT_SEED,
+    );
+  });
+
+  it('rolls on the tick its cooldown reaches zero', () => {
+    // One tick of cooldown left, so the decrement at the top takes it to zero and
+    // this is the first tick the fish may choose. The boundary specifically: an
+    // implementation guarding on the pre-decrement value would wait a tick.
+    const ready = fishAt({
+      ...IN_CLOSE_BAND,
+      definition: TWO_ATTACK_CLOSE,
+      attackCooldownRemaining: 1,
+    });
+
+    expect(stepFishAttack(ready, ON_TOP, DEFAULT_SEED).seed).not.toBe(
+      DEFAULT_SEED,
+    );
+  });
+
+  /**
+   * A fish off cooldown that draws a melee column it cannot reach commits to
+   * nothing, and has to keep the advanced seed anyway. Holding the old one would
+   * make it redraw the same unreachable attack every tick for the rest of the
+   * fight, standing there until the boat happened to walk into that one attack.
+   */
+  it('keeps the roll it could not use, so it draws again next tick', () => {
+    const outOfReach = fishAt({
+      ...IN_CLOSE_BAND,
+      definition: TWO_ATTACK_CLOSE,
+      attackCooldownRemaining: 0,
+    });
+    const result = stepFishAttack(outOfReach, FAR_AWAY, DEFAULT_SEED);
+
+    expect(result.seed).not.toBe(DEFAULT_SEED);
+  });
+});
 
 describe('closePunisherHits: the hitbox', () => {
   it('catches a boat directly above the fish', () => {

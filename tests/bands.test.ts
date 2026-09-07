@@ -3,6 +3,7 @@ import { attackForBand, stepReposition } from '../src/sim/ai/bands.ts';
 import { meleeReach } from '../src/sim/ai/patterns.ts';
 import { createFightState } from '../src/sim/state.ts';
 import type { FishState } from '../src/sim/state.ts';
+import { DEFAULT_SEED, nextRandom } from '../src/sim/rng.ts';
 import {
   BOAT_SPEED_PER_TICK,
   FISH_BAND_HYSTERESIS,
@@ -42,52 +43,146 @@ function closeBandWidth(depth: number): number {
   return Math.sqrt((BAND_EDGE - FISH_BAND_HYSTERESIS) ** 2 - depth ** 2);
 }
 
+/**
+ * A grey box fish whose close band holds two attacks at the given weights.
+ *
+ * Every fish in `ALL_FISH` is `common`, which design.md section 3 defines as one
+ * attack per band, so nothing shipped exercises the roll at all. This is the
+ * fixture that does, and it is deliberately not a registered fish for the same
+ * reason `fight.test.ts`'s DUMMY is not: it is chosen to be a shape the game does
+ * not currently contain.
+ */
+function twoAttackFish(lungeWeight: number, volleyWeight: number) {
+  return {
+    ...GREY_BOX,
+    bands: [
+      {
+        ...CLOSE_BAND,
+        attacks: [
+          { patternId: 'lunge', weight: lungeWeight },
+          { patternId: 'volley', weight: volleyWeight },
+        ],
+      },
+      FAR_BAND,
+    ],
+  };
+}
+
+/** Roll `n` times, threading the seed the way `stepFishAttack` does. */
+function rollMany(
+  fish: ReturnType<typeof twoAttackFish>,
+  seed: number,
+  n: number,
+): string[] {
+  const drawn: string[] = [];
+  let next = seed;
+
+  for (let i = 0; i < n; i++) {
+    const choice = attackForBand(fish, 'close', next);
+    drawn.push(choice.patternId);
+    next = choice.seed;
+  }
+  return drawn;
+}
+
 describe('attackForBand: selecting by band', () => {
   it('answers each band with the attack its list names', () => {
-    expect(attackForBand(GREY_BOX, 'close')).toBe('lunge');
-    expect(attackForBand(GREY_BOX, 'far')).toBe('volley');
+    expect(attackForBand(GREY_BOX, 'close', DEFAULT_SEED).patternId).toBe(
+      'lunge',
+    );
+    expect(attackForBand(GREY_BOX, 'far', DEFAULT_SEED).patternId).toBe(
+      'volley',
+    );
   });
 
   // design.md section 3's no-safe-camping-spot rule, from the selection side of
   // it. Both attacks have to be reachable or one position on the lane is free.
   it('reaches a different attack in each band', () => {
-    const reachable = GREY_BOX.bands.map((band) =>
-      attackForBand(GREY_BOX, band.id),
+    const reachable = GREY_BOX.bands.map(
+      (band) => attackForBand(GREY_BOX, band.id, DEFAULT_SEED).patternId,
     );
 
     expect(new Set(reachable).size).toBe(GREY_BOX.bands.length);
   });
 
   /**
-   * The guard that keeps a half-built feature honest. design.md section 3 gives
-   * each band "a small weighted list" and the format carries the weights, but
-   * the roll that would read them needs a seeded RNG inside a deterministic
-   * `sim/` and is its own task.
+   * The short-circuit that made this task change no behaviour. A band holding
+   * one attack has nothing to decide, so it must not consume a roll: every fish
+   * in the game is `common`, and a one-entry list that spent a roll would churn
+   * the seed all fight in fights where nothing is ever random.
    *
-   * Until then a second attack in a band must fail loudly. Returning the first
-   * entry instead would make a data change look like it worked, play like it did
-   * nothing, and cost a playtest to notice.
+   * The consequence worth having is that giving one fish a second attack cannot
+   * shift what any other fish draws.
    */
-  it('refuses a band holding more than one attack, for now', () => {
-    const twoAttacks = {
+  it('does not spend a roll on a band holding one attack', () => {
+    for (const band of GREY_BOX.bands) {
+      expect(attackForBand(GREY_BOX, band.id, DEFAULT_SEED).seed).toBe(
+        DEFAULT_SEED,
+      );
+    }
+  });
+
+  it('spends exactly one roll on a band holding two', () => {
+    const fish = twoAttackFish(1, 1);
+    const choice = attackForBand(fish, 'close', DEFAULT_SEED);
+
+    expect(choice.seed).not.toBe(DEFAULT_SEED);
+    expect(choice.seed).toBe(nextRandom(DEFAULT_SEED).seed);
+  });
+
+  /**
+   * design.md section 3 asks each band for "a small weighted list", and this is
+   * the only test that checks the weights mean anything. Three-to-one over two
+   * thousand rolls, which is deterministic rather than merely probable: the seed
+   * is fixed, so this either always passes or always fails.
+   *
+   * A tolerance rather than an exact count, on purpose. The exact number is a
+   * property of mulberry32 rather than of this code, and pinning it would turn a
+   * test about weighting into a test that fails if the PRNG is ever replaced.
+   */
+  it('splits a band along its weights', () => {
+    const rolls = 2000;
+    const drawn = rollMany(twoAttackFish(3, 1), DEFAULT_SEED, rolls);
+    const lunges = drawn.filter((id) => id === 'lunge').length;
+
+    expect(lunges / rolls).toBeCloseTo(0.75, 1);
+  });
+
+  it('can draw either attack in a band holding two', () => {
+    // Guards the test above against passing because one entry is never drawn:
+    // a roll that always answered 'lunge' would still land inside a tolerance
+    // if the weights were lopsided enough.
+    const drawn = new Set(rollMany(twoAttackFish(1, 1), DEFAULT_SEED, 50));
+
+    expect(drawn).toEqual(new Set(['lunge', 'volley']));
+  });
+
+  it('gives the same sequence from the same seed and a different one from another', () => {
+    const fish = twoAttackFish(1, 1);
+
+    expect(rollMany(fish, 12345, 50)).toEqual(rollMany(fish, 12345, 50));
+    expect(rollMany(fish, 12345, 50)).not.toEqual(rollMany(fish, 999, 50));
+  });
+
+  it('refuses a band with no attacks in it', () => {
+    // A data fault rather than a game state: a band the fish can be pulled into
+    // and then do nothing from is a safe camping spot, which is the one thing
+    // design.md section 3 will not have. `tests/fish.test.ts` refuses to
+    // register such a fish; this is the engine refusing to run one.
+    const empty = {
       ...GREY_BOX,
-      bands: [
-        {
-          ...CLOSE_BAND,
-          attacks: [
-            { patternId: 'lunge', weight: 1 },
-            { patternId: 'volley', weight: 1 },
-          ],
-        },
-        FAR_BAND,
-      ],
+      bands: [{ ...CLOSE_BAND, attacks: [] }, FAR_BAND],
     };
 
-    expect(() => attackForBand(twoAttacks, 'close')).toThrow(/selection/);
+    expect(() => attackForBand(empty, 'close', DEFAULT_SEED)).toThrow(
+      /no attacks/,
+    );
   });
 
   it('refuses a band the fish does not have', () => {
-    expect(() => attackForBand(GREY_BOX, 'mid')).toThrow(/no band/);
+    expect(() => attackForBand(GREY_BOX, 'mid', DEFAULT_SEED)).toThrow(
+      /no band/,
+    );
   });
 });
 

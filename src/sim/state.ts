@@ -14,6 +14,7 @@ import {
 } from '../data/config.ts';
 import { GREY_BOX } from '../data/fish/greyBox.ts';
 import type { FishDefinition } from '../data/fish/types.ts';
+import { DEFAULT_SEED } from './rng.ts';
 
 export interface BoatState {
   /**
@@ -316,6 +317,22 @@ export interface FightState {
   /** Ticks since the fight began. Every duration in the fight counts in these. */
   tick: number;
   /**
+   * The simulation's randomness, carried as state rather than reached for.
+   *
+   * Advanced by every roll and threaded back out through `stepFight`, which
+   * makes a fight a pure function of this number and its input sequence. See
+   * `sim/rng.ts` for why it has to live here rather than in a generator object,
+   * and why `Math.random` is not available in this directory.
+   *
+   * At the top level beside `tick` because it belongs to the fight rather than
+   * to either combatant: in phase 7 the room owns it, and a fish carrying its
+   * own would give two boats two different fish.
+   *
+   * Only `attackForBand` reads it today, and only when a band holds more than
+   * one attack, so against all four current fish it never moves.
+   */
+  rngSeed: number;
+  /**
    * Whether the fight is still being fought, and how it ended if it is not.
    *
    * Anything but `fighting` freezes the simulation: `stepFight` stops reading
@@ -393,8 +410,17 @@ export interface FightInputs {
  * The default argument is not laziness either: phase 4.1's encounter roll is what
  * will choose the fish, and until it exists every caller wants the one fish there
  * is.
+ *
+ * `seed` opens the fight's random stream, and its default is a **constant** for
+ * the same reason the fish's is: a caller that does not care wants the same
+ * answer every time. Seeding it from `Math.random` here would put the one thing
+ * `sim/rng.ts` exists to keep out of this directory into the one function every
+ * test calls. The game layer passes real entropy in; see `FightScene`.
  */
-export function createFightState(fish: FishDefinition = GREY_BOX): FightState {
+export function createFightState(
+  fish: FishDefinition = GREY_BOX,
+  seed: number = DEFAULT_SEED,
+): FightState {
   // The band the fight opens in, and the station the fish opens at. Seeded from
   // the outermost band rather than computed from the geometry, and it has to be:
   // against the grey box fish the opening line is 141 units, which sits inside
@@ -411,6 +437,7 @@ export function createFightState(fish: FishDefinition = GREY_BOX): FightState {
 
   return {
     tick: 0,
+    rngSeed: seed,
     stage: 'fighting',
     stageTicksRemaining: 0,
     boat: {

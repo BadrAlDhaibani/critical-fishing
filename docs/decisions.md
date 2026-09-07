@@ -1342,3 +1342,72 @@ already solved this way, and design.md pillar 4 wants effects on the line anyway
 And **no fifth sound cue.** The heavy landing already fires the `attack` cue for
 free, since `ImpactWatcher` sees the resistance drop; only the wind-up is silent,
 which matches the 2.5 decision that a refused attack stays silent.
+
+---
+
+## 2026-09-07: Weighted attack selection, and the seed rides on the fight state
+
+Task 3.5, scheduled ahead of phase 4.1 rather than after it. Roadmap open
+finding 3 capped every fish at `common`, because design.md section 3 defines the
+rarity ladder in attack counts and `attackForBand` threw on a band holding more
+than one. 4.1's encounter table weights against `rarity`, so building it first
+would have meant a table weighting across four fish of one tier.
+
+**Randomness is a number on `FightState`, not a generator.** `sim/` moves to the
+Colyseus server in phase 7, where a fight has to replay identically on the server
+and on every client predicting it, so `Math.random` is unavailable in that
+directory by rule. `FightState.rngSeed` is advanced by each roll and threaded
+back out through `stepFight`, which makes a fight a pure function of its opening
+seed and its input sequence.
+
+`nextRandom(seed)` returns `{ value, seed }` rather than holding state. The
+awkwardness is deliberate: a caller has to thread the new seed out to its own
+caller, so a roll cannot be slipped into a function that does not already admit
+to being random. A generator object would let anything holding a reference roll
+invisibly, and the seed would stop being on the state where phase 7 needs it.
+
+**mulberry32**, chosen for three properties and no others: five lines with no
+dependency, whole state is one 32-bit integer so it fits on the wire beside
+`tick`, and integer arithmetic throughout so client and server cannot disagree
+through floating-point rounding. Statistical quality was never the question.
+
+**The real entropy enters in `FightScene`**, which is the third and last
+`Math.random` in the codebase after `shake.ts` and `synth.ts`, and in `game/` for
+the same reason both of those are. `createFightState`'s seed argument defaults to
+a **constant**, so tests are deterministic without arranging anything.
+
+Three judgement calls worth recording, all approved with the plan.
+
+**A single-entry list does not roll and returns the seed untouched.** Not an
+optimisation. Every fish in the game is `common` — one attack per band — so a
+one-entry list that spent a roll would churn the stream sixty times a second in
+fights where nothing is ever random. Two consequences worth having: 3.5 changed
+no behaviour in any existing fight, and giving one fish a second attack cannot
+shift what another fish draws.
+
+**The roll moved inside the cooldown check.** `attackForBand` was previously
+called on every idle tick, because its answer feeds the melee reach test and that
+was free while it could only answer one thing. Left there it would churn the seed
+through a 45 to 90 tick cooldown to decide something the fish may not act on.
+Nothing else in the suite notices this moving — the fish attacks on the same
+ticks either way — so `patterns.test.ts` pins it explicitly.
+
+**A fish that draws an attack it cannot reach with keeps the advanced seed.** It
+has to: holding the old seed would make it redraw the same unreachable attack
+forever, standing there until the boat walked into that one attack. The honest
+consequence, which matters at the first fish above common: re-drawing until
+something commits filters the choice by what the current distance allows, so a
+fish sat outside its own hitbox reaches for a volley more often than the raw
+weights say. **Weights describe what a fish prefers, not the split observed
+across a fight.** That is the behaviour worth having — the alternative is a fish
+repeatedly committing to a swing that cannot land — but it is not what a reader
+of the data file would assume.
+
+**The design boundary did not move.** design.md section 3 forbids randomised
+positioning and asks for weighted random attack choice. `stepReposition` still
+reads no random number and still must not: "the fish is shallow" stays a window
+the player earned. Only which of the things it can do from there is rolled.
+
+**No fish gained a second attack.** That is open finding 2, it makes the grey box
+fish `uncommon`, and design.md section 3's ladder makes it a design decision
+rather than a data change. It is now pure data and waiting on a yes.

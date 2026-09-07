@@ -15,11 +15,21 @@ Update this block at the end of every batch. Keep it to a few lines.
 - **Current phase: 4, the loop around the fight. Phases 1, 2 and 3 are all
   closed**, apart from task 1.2c, which is still open and still not
   gameplay-blocking.
-- **Last completed task:** 3.4, the heavy attack, which closed phase 3. Before it,
-  3.3 proved the content template by adding three fish as data alone. The fight
-  itself is now feature-complete as design.md sections 2 and 3 describe it: two
-  player attacks, a dash, four fish, two attack shapes, bands with hysteresis,
-  win and lose states.
+- **Last completed task:** 3.5, weighted attack selection, added after phase 3
+  had already closed because open finding 3 capped every fish at `common` and
+  4.1's encounter table weights against `rarity`. Before it, 3.4 added the heavy
+  attack and 3.3 proved the content template. The fight is feature-complete as
+  design.md sections 2 and 3 describe it: two player attacks, a dash, four fish,
+  two attack shapes, bands with hysteresis, win and lose states.
+- **3.5 in one line:** `sim/rng.ts` (mulberry32, `nextRandom(seed) -> {value,
+  seed}`), `FightState.rngSeed` threaded through `stepFight` → `stepFishAttack` →
+  `attackForBand`, real entropy injected in `FightScene` and nowhere else in
+  `sim/`. It **changed no behaviour**: a one-attack band short-circuits without
+  spending a roll, and every fish is still `common`, so no shipped fight rolls
+  anything. Three judgement calls behind it are in decisions.md 2026-09-07 and
+  the third is the one that will surprise you — **weights describe what a fish
+  prefers, not the split you will observe**, because a fish that draws a melee
+  column out of reach re-draws next tick.
 - **Next task:** 4.1, the cast and encounter roll. _Context: design.md section 5,
   architecture.md section 6._ **Read both before starting — this is a different
   phase and neither doc has been read recently.** Three things to know going in:
@@ -30,24 +40,34 @@ Update this block at the end of every batch. Keep it to a few lines.
   - **The encounter weights are an open question in design.md section 8. Ask
     Badr, do not invent them.** Same for anything in the economy at 4.2.
   - `ALL_FISH` in `data/fish/index.ts` is the registry 4.1 rolls against, and
-    `createFightState(fish)` already takes a definition. **The known debt is in
+    `createFightState(fish, seed)` already takes both. **The known debt is in
     the renderer, not the sim**: see point 4 under "The fish format" below.
     `game/scenes/fishPicker.ts` is the debug stand-in for this roll and shows
     what a fish swap currently costs.
-- **Open finding 3 caps every fish at `common`** and is the first thing to
-  schedule if phase 4 wants variety in its encounter table. It also blocks finding
-  2. This is phase 3's parting finding and it is not fixed.
+  - **Decide where the encounter roll's randomness comes from.** 3.5 built a
+    seeded PRNG, but the determinism rule it satisfies is `sim/`'s, and the
+    encounter roll belongs in `meta/`. `sim/rng.ts` is reusable there and
+    `Math.random` is legal there; picking deliberately beats drifting into one.
+- **Every fish is still `common`, but nothing is stopping that any more.** 3.5
+  closed open finding 3, so uncommon and rare are pure data and finding 2 is
+  waiting only on a design yes. Boss still needs a `phases` field nothing
+  implements. If 4.1 wants a rarity axis worth weighting, that yes is the input.
 - **Phase 1 exited without its twenty-fight exit test**, and phase 2 then added
   two of the three effects design.md section 6 warns **hide bad timing**. Badr's
   deliberate call, recorded in decisions.md 2026-08-20. If the fight ever starts
   reading as unfair or mushy, suspect the phase 1 tuning before the effects
   layer, and see `GAME_PACE` below.
-- **In a half state:** nothing. **Awaiting a yes:** four proposed edits to
-  architecture.md, listed under open finding 9. Two are from phase 1 and two from
-  3.1; none has been written, since architecture.md is Firm tier.
-- **Proposed but not written:** two additions to `patterns.md`, for commitment
-  counters and for silent all-or-nothing refusals. Both hit three uses at 3.4.
-  Shown in that batch's report and not yet approved.
+- **In a half state:** nothing. 3.4 was committed as `677d596` during the 3.5
+  batch; 3.5's own work was uncommitted at the end of it, awaiting the playtest.
+- **Awaiting a yes:** four proposed edits to architecture.md, listed under open
+  finding 9. Two are from phase 1 and two from 3.1; none has been written, since
+  architecture.md is Firm tier. 3.5 adds a fifth candidate rather than a proposal:
+  section 2's layout does not list `sim/rng.ts`, which now exists.
+- **Proposed but not written:** three additions to `patterns.md` — commitment
+  counters, silent all-or-nothing refusals, and "prove a validation rule by
+  breaking it". The first two hit three uses at 3.4; the third reached a fourth
+  use at 3.5 and has caught something every time. All shown in their batch
+  reports and none approved.
 
 ### The fish format
 
@@ -264,7 +284,9 @@ Most are pinned by tests and will fail the suite. These three are the traps.
 
 `sim/fight.ts` steps everything; `sim/ai/patterns.ts` runs the attacks and
 `sim/ai/bands.ts` chooses and repositions; `sim/distance.ts` owns `lineLength`
-and `bandFor` with its hysteresis. Per architecture.md section 2, and `sim/`
+and `bandFor` with its hysteresis. Since 3.5 `sim/rng.ts` holds the PRNG, and it
+is the file to read before adding anything random anywhere. Per architecture.md
+section 2, which does not list either `sim/loop.ts` or `sim/rng.ts`, and `sim/`
 imports nothing from Phaser.
 
 Since 3.1 none of those four files holds a fish number. They read
@@ -303,23 +325,19 @@ precisely because nothing simulates.
 2. **A second attack in the close band**, the structural fix for close camping
    that round 1 could only narrow with numbers. Makes the grey box fish an
    "uncommon" under design.md section 3's rarity ladder, so it needs a design yes.
-   **Now pure data**, apart from needing finding 3 first: a second `meleeColumn`
-   pattern and a second entry in the close band's list, no engine change.
-3. **Weighted attack selection: the list exists, the roll does not.** **Promoted
-   by 3.3 to the thing gating content.** design.md section 3 gives each band "a
-   small weighted list", so varied attack choice is on-design. Since 3.1 the
-   format carries `attacks: [{ patternId, weight }]` and `attackForBand`
-   **throws** on more than one entry, so this is a self-announcing gap rather
-   than a silent one. What it needs is a source of randomness inside a `sim/`
-   that is deterministic on purpose — a seed on `FightState`, advanced per roll,
-   so the same seed and inputs replay the same fight. That is the whole task.
-   **Until it lands, every fish in the game must be `common`**: design.md
-   section 3's uncommon *is* a second attack in a band and its rare *is* two or
-   three attacks per band, so both are unbuildable in data, and boss additionally
-   needs a `phases` field that architecture.md section 4 sketches and nothing
-   implements. It also unblocks finding 2. The boundary that matters and has not
-   moved: design.md forbids random **positioning** and permits weighted random
-   **attack choice**.
+   **Unblocked by 3.5 and now pure data**: a second `meleeColumn` pattern and a
+   second entry in the close band's list, no engine change. Nothing is waiting on
+   code any more — only on the design decision.
+3. **Closed by task 3.5 on 2026-09-07.** `sim/rng.ts` holds a mulberry32 PRNG,
+   `FightState.rngSeed` carries it, and `attackForBand` rolls. Uncommon and rare
+   fish are now pure data. **Boss still is not**: it needs the `phases` field
+   architecture.md section 4 sketches and nothing implements. Two things this
+   left behind rather than settled, both in decisions.md: a fish that draws an
+   attack it cannot reach with re-draws next tick, so **weights describe what a
+   fish prefers rather than the split you will observe**; and `rngSeed` is
+   currently spent by nothing else, so 4.1's encounter roll has to decide whether
+   it wants this stream, its own, or `Math.random` in `meta/` — the determinism
+   rule is `sim/`'s, and the encounter roll is not in `sim/`.
 4. **Depth variety beyond two resting stations.** design.md section 3 already
    names "drifts shallow when low on resistance". Phase 3.
 5. **`stepFight` reads as six stacked concerns** and names eighteen fields plus a
@@ -370,9 +388,19 @@ precisely because nothing simulates.
 - The pool is fractional, so tests on it need `toBeCloseTo`, and how much was
   spent cannot be read off the final pool. Use the `lowestLine` helper.
 - The suite derives from named data rather than hard-coding ticks, which is why
-  all 198 tests survived `GAME_PACE` with no edits and why 3.1 changed imports
-  rather than assertions. Since 3.1 the fish half of that data is read off
-  `GREY_BOX` and its patterns rather than off `config.ts`. Keep it that way.
+  all 198 tests survived `GAME_PACE` with no edits, why 3.1 changed imports
+  rather than assertions, and why 3.5 changed call signatures and not one
+  assertion. Since 3.1 the fish half of that data is read off `GREY_BOX` and its
+  patterns rather than off `config.ts`. Keep it that way. 310 tests as of 3.5.
+- **The roll needs a fish shape no registered fish has.** Every fish in
+  `ALL_FISH` is `common`, one attack per band, so nothing shipped rolls at all
+  and any test of weighted selection written against a real fish passes
+  vacuously. Three local fixtures exist for it and none is registered, for the
+  same reason DUMMY is not: `twoAttackFish()` in `bands.test.ts`,
+  `TWO_ATTACK_CLOSE` in `patterns.test.ts`, and `TWO_ATTACK_FAR` in
+  `fight.test.ts`. The last puts the pair in the **far** band on purpose — the
+  fight opens there off cooldown, so the roll happens on tick one with nothing
+  arranged, and a drawn `lunge` is out of reach and visibly re-drawn.
 - **`tests/fight.test.ts` has a `DUMMY` fish**, a synthetic definition whose every
   number is unlike the grey box fish's. It is the fixture that catches a value
   which quietly stayed hard-coded: such a value shows up as the grey box fish's
@@ -394,10 +422,13 @@ precisely because nothing simulates.
   `data/fish/`, watching it fail, and deleting it. Do the same for any rule added
   there — several of these rules pass vacuously against a single well-formed fish,
   which is exactly the state the suite is in most of the time.
-- **The same discipline has now been applied three times** — 3.2's broken fish,
-  3.3's four one-at-a-time breaks, 3.4's five. It is the house rule for anything
-  asserting a rule rather than a value, and it has caught something every time.
-  Proposed for `patterns.md`; see the report for 3.4.
+- **The same discipline has now been applied four times** — 3.2's broken fish,
+  3.3's four one-at-a-time breaks, 3.4's five, 3.5's five. It is the house rule
+  for anything asserting a rule rather than a value, and it has caught something
+  every time. At 3.5 it caught a real gap rather than confirming a test: the
+  roll-on-commit ordering had **no** test until breaking it proved nothing
+  failed, and `patterns.test.ts`'s "does not roll while its cooldown is running"
+  exists only because of that. Still proposed for `patterns.md`, not approved.
 
 ---
 
@@ -530,10 +561,18 @@ _Context for all of phase 2: design.md section 6._
       rejected alternatives are in decisions.md 2026-08-21. design.md section 2's
       control scheme is now complete — one basic, one heavy, and nothing else.
 
-**Phase 3 is closed.** The content template was proved by 3.3 and the player's
-moveset finished by 3.4. The one thing the phase surfaced and did not fix is open
-finding 3, which caps every fish at `common`; it is the first thing to schedule
-if phase 4 wants variety in the encounter table.
+- [x] **3.5 Weighted attack selection.** Closed 2026-09-07, scheduled after 3.4
+      had already closed the phase, because open finding 3 capped every fish at
+      `common` and 4.1's encounter table weights against `rarity`. Added
+      `sim/rng.ts` and `FightState.rngSeed`; `attackForBand` rolls instead of
+      throwing. **Changed no behaviour in any existing fight** — a one-attack band
+      short-circuits without spending a roll, and all four fish are `common`.
+      Shape and its three judgement calls in decisions.md 2026-09-07.
+
+**Phase 3 is closed.** The content template was proved by 3.3, the player's
+moveset finished by 3.4, and the rarity ladder unblocked by 3.5. Fish above
+`common` are now buildable in data, except `boss`, which additionally needs the
+`phases` field architecture.md section 4 sketches and nothing implements.
 
 _Context: architecture.md section 4, design.md sections 2 and 3._
 

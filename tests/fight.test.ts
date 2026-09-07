@@ -26,6 +26,7 @@ import {
   REEL_IN_TICKS,
 } from '../src/data/config.ts';
 import { GREY_BOX } from '../src/data/fish/greyBox.ts';
+import { ALL_FISH } from '../src/data/fish/index.ts';
 import type { FishDefinition } from '../src/data/fish/types.ts';
 import {
   activeTicksOf,
@@ -1169,6 +1170,90 @@ describe('stepFight: purity', () => {
     const b = hold(createFightState(), RIGHT, 25);
 
     expect(a).toEqual(b);
+  });
+});
+
+/**
+ * A grey box fish whose **far** band holds two attacks rather than one.
+ *
+ * The far band rather than the close one because the fight opens there, off
+ * cooldown and 100 units clear of the boat, so the roll happens on tick one and
+ * nothing has to be arranged to reach it.
+ *
+ * `lunge` is a melee column and the boat is far outside its hitbox, so a tick
+ * that draws it commits to nothing and draws again next tick. That is on purpose
+ * as well as convenient: it exercises the re-roll path, and it turns the roll
+ * into something a test can *see*, since the tick the volley finally starts on
+ * is decided by the seed.
+ *
+ * Not in `ALL_FISH` and must not be, for the same reason DUMMY is not: every
+ * registered fish is `common`, and this is deliberately a shape the game does
+ * not yet contain.
+ */
+const TWO_ATTACK_FAR: FishDefinition = {
+  ...GREY_BOX,
+  id: 'two-attack-far',
+  bands: [
+    GREY_BOX.bands[0],
+    {
+      ...GREY_BOX.bands[1],
+      attacks: [
+        { patternId: 'volley', weight: 1 },
+        { patternId: 'lunge', weight: 1 },
+      ],
+    },
+  ],
+};
+
+describe('stepFight: the fight carries its own randomness', () => {
+  // The seed lives at the top level of FightState, which `stepFight` rebuilds
+  // from scratch like the boat and the fish. A field left unnamed there vanishes
+  // one tick in, and this one would fail quietly: the stream would reset every
+  // tick and the fish would draw the same attack forever.
+  it('carries the seed forward', () => {
+    const start = createFightState(GREY_BOX, 4242);
+
+    expect(start.rngSeed).toBe(4242);
+    expect(hold(start, LEFT, 300).rngSeed).toBe(4242);
+  });
+
+  // Against a `common` fish nothing rolls, so the seed must not move at all.
+  // Every fish in ALL_FISH is common, so this is the shipped case.
+  it('never spends a roll on a fish with one attack per band', () => {
+    for (const fish of ALL_FISH) {
+      const after = hold(createFightState(fish, 4242), RIGHT, 400);
+
+      expect(after.rngSeed).toBe(4242);
+    }
+  });
+
+  it('spends the seed on a fish with two attacks in a band', () => {
+    const after = hold(createFightState(TWO_ATTACK_FAR, 4242), noInputs(), 40);
+
+    expect(after.rngSeed).not.toBe(4242);
+  });
+
+  /**
+   * The property this whole task exists for, and the one phase 7 needs: a fight
+   * is a pure function of its opening state and its inputs. The server and every
+   * client predicting it have to arrive at the same fish doing the same thing.
+   *
+   * Run against the two-attack fish specifically. The same assertion over a
+   * `common` fish passes whether or not the seed is threaded at all, which is
+   * the kind of test the roadmap's own notes warn is worth nothing.
+   */
+  it('replays identically from the same seed and the same inputs', () => {
+    const a = hold(createFightState(TWO_ATTACK_FAR, 4242), noInputs(), 300);
+    const b = hold(createFightState(TWO_ATTACK_FAR, 4242), noInputs(), 300);
+
+    expect(a).toEqual(b);
+  });
+
+  it('plays out differently from a different seed', () => {
+    const a = hold(createFightState(TWO_ATTACK_FAR, 4242), noInputs(), 300);
+    const b = hold(createFightState(TWO_ATTACK_FAR, 99), noInputs(), 300);
+
+    expect(a).not.toEqual(b);
   });
 });
 

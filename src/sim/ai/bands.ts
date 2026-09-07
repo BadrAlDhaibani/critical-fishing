@@ -8,8 +8,14 @@
  * The fish picks its attack from the band it is in, and it repositions with
  * intent. What it must never do is reposition randomly: "the fish is shallow
  * right now" has to read as a window the player earned by closing in, not as
- * luck. Nothing in here reads a random number, and there is nowhere one could be
- * added without the two rules below stopping making sense.
+ * luck.
+ *
+ * Both halves of that live in this one file, which is why the line between them
+ * is drawn twice below. `attackForBand` rolls, because design.md section 3 asks
+ * each band for "a small weighted list" and a list is only a list if something
+ * chooses from it. `stepReposition` does not and may not: it reads no random
+ * number and there is nowhere one could be added to it without the rule above
+ * stopping making sense.
  *
  * Every number this file works with comes off the fish's definition. What is left
  * here is the two rules themselves, which are the engine's.
@@ -20,35 +26,73 @@
 
 import { bandById } from '../../data/fish/types.ts';
 import type { FishDefinition } from '../../data/fish/types.ts';
+import { nextRandom } from '../rng.ts';
 import type { BandId, FishState } from '../state.ts';
+
+/** The attack the fish committed to, and the seed the next roll must use. */
+export interface AttackChoice {
+  patternId: string;
+  seed: number;
+}
 
 /**
  * Which of the band's attacks the fish commits to.
  *
  * design.md section 3 gives each band "a small weighted list", and the definition
- * carries exactly that. **What is not built yet is the roll.** Weighted selection
- * needs a source of randomness, and `sim/` is deliberately deterministic —
- * `Math.random` appears in `game/feel/shake.ts` and `game/audio/synth.ts` and
- * nowhere else — so it needs a seed on the fight state and is its own task, in
- * the roadmap as open finding 3.
+ * carries exactly that. This is the roll over it. Randomness comes in as a seed
+ * and goes back out advanced, because `sim/` has no `Math.random` to reach for;
+ * `sim/rng.ts` says why at length.
  *
- * Until then a list of one is the only list this can answer, and it **throws** on
- * anything longer rather than quietly returning the first entry. That is the
- * whole point of the check: a second attack added to a band is a data change that
- * would otherwise look like it worked, play like it did nothing, and take a
- * playtest to notice.
+ * **A single-entry list does not roll and returns the seed untouched.** That is a
+ * deliberate short-circuit, not an optimisation. Every fish in the game is
+ * `common`, which design.md section 3 defines as one attack per band, so if a
+ * one-entry list consumed a roll then the random stream would be advancing 60
+ * times a second in fights where nothing is ever random. Leaving it alone means
+ * two things worth having: this task changed no behaviour in any existing fight,
+ * and giving one fish a second attack cannot shift what any other fish rolls.
+ *
+ * **An empty list throws.** A band with nothing to do is a data fault rather than
+ * a game state — `tests/fish.test.ts` refuses to register such a fish — and the
+ * throw is what stops it becoming a fish that stands there.
+ *
+ * The boundary this sits on has not moved and is worth restating: design.md
+ * section 3 forbids randomised **positioning** and asks for weighted random
+ * **attack choice**. `stepReposition` below still reads no random number and
+ * still must not. "The fish is shallow" stays a window the player earned; only
+ * "which of the two things it can do from here" is rolled.
  */
-export function attackForBand(fish: FishDefinition, band: BandId): string {
+export function attackForBand(
+  fish: FishDefinition,
+  band: BandId,
+  seed: number,
+): AttackChoice {
   const { attacks } = bandById(fish, band);
 
-  if (attacks.length !== 1) {
-    throw new Error(
-      `fish ${fish.id} band ${band} has ${attacks.length} attacks; weighted ` +
-        `selection is not built yet, so exactly one is the only supported list`,
-    );
+  if (attacks.length === 0) {
+    throw new Error(`fish ${fish.id} band ${band} has no attacks`);
   }
 
-  return attacks[0].patternId;
+  if (attacks.length === 1) {
+    return { patternId: attacks[0].patternId, seed };
+  }
+
+  const total = attacks.reduce((sum, attack) => sum + attack.weight, 0);
+  const roll = nextRandom(seed);
+  let remaining = roll.value * total;
+
+  for (const attack of attacks) {
+    remaining -= attack.weight;
+
+    if (remaining < 0) {
+      return { patternId: attack.patternId, seed: roll.seed };
+    }
+  }
+
+  // Unreachable: `roll.value` is strictly below 1, so `remaining` starts strictly
+  // below `total` and the subtractions must take it negative before the list runs
+  // out. Returning the last entry rather than throwing, because a rounding error
+  // on the final entry is not worth ending a fight over.
+  return { patternId: attacks[attacks.length - 1].patternId, seed: roll.seed };
 }
 
 /** Move `from` towards `to` by at most `step`, never overshooting it. */

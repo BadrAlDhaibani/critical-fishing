@@ -51,6 +51,22 @@ import { CueAudition } from '../audio/audition.ts';
 import { FishPicker, selectedFish } from './fishPicker.ts';
 
 /**
+ * A fresh opening seed for a fight, as a signed 32-bit integer.
+ *
+ * The third and last `Math.random` in the codebase, after `game/feel/shake.ts`
+ * and `game/audio/synth.ts`, and in `game/` for the same reason both of those
+ * are: `sim/` is replayable and this is not. Everything downstream of here is
+ * deterministic, so this one call is the whole difference between two fights.
+ *
+ * Scaled to the full 32-bit range rather than passed through as a fraction,
+ * because `nextRandom` treats its seed as an integer and would round every
+ * fraction to the same zero.
+ */
+function randomSeed(): number {
+  return (Math.random() * 0x100000000) | 0;
+}
+
+/**
  * Draws a fight and forwards input to it. Owns no game logic whatsoever: every
  * number that matters comes out of sim/, and this class only decides where on
  * the screen to put it.
@@ -254,8 +270,15 @@ export class FightScene extends Phaser.Scene {
     // at the moment a fight starts and there is no second copy of that answer to
     // drift from it. Until phase 4.1's encounter roll, the URL is the only thing
     // that decides this. See fishPicker.ts.
+    //
+    // This is where the simulation's randomness actually comes from, and the
+    // only place it may. `sim/` cannot call `Math.random` — it moves to the
+    // server in phase 7, where a fight has to replay identically — so it takes a
+    // seed instead and advances it itself. Handing it a fresh one here is what
+    // makes two fights against the same fish differ; `createFightState`'s
+    // default is a constant so that tests do not. See sim/rng.ts.
     this.driver = new FixedStepDriver<FightState>(
-      createFightState(selectedFish()),
+      createFightState(selectedFish(), randomSeed()),
       (state) => stepFight(state, this.inputs),
     );
 

@@ -1,9 +1,14 @@
 /**
- * The fight simulation. Pure TypeScript, no Phaser, no globals, no randomness.
+ * The fight simulation. Pure TypeScript, no Phaser, no globals.
  *
  * architecture.md section 1: this is the code that moves to the Colyseus server
  * in phase 7, so it takes inputs and previous state and returns new state, and
  * does nothing else.
+ *
+ * That includes its randomness. Since 3.5 the fish rolls its attack out of the
+ * band's weighted list, and the seed it rolls with arrives on `FightState` and
+ * leaves on the returned one. Nothing in here calls `Math.random`, so a fight is
+ * still a pure function of its opening state and its inputs; see `sim/rng.ts`.
  *
  * There is no `dt` parameter. architecture.md section 3 fixes the timestep at
  * 60 Hz, so one call to stepFight is exactly one tick, and every duration in
@@ -298,7 +303,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // an attack committed this tick winds up from where the fish now is rather
   // than from where it was before it moved.
   const shots = stepProjectiles(state.projectiles, x, state.fish.definition);
-  const attack = stepFishAttack({ ...state.fish, band, x: fishX, depth }, x);
+  const attack = stepFishAttack(
+    { ...state.fish, band, x: fishX, depth },
+    x,
+    state.rngSeed,
+  );
   const projectiles = [...shots.projectiles, ...attack.spawned];
 
   // Both can land in the same tick. That is the volley outliving the attack that
@@ -328,6 +337,11 @@ export function stepFight(state: FightState, inputs: FightInputs): FightState {
   // while nothing wrote to it. The basic attack writes to it.
   return {
     tick: state.tick + 1,
+    // Carried back out of the only thing that rolls. Named here like everything
+    // else because this object is rebuilt from scratch: a dropped seed would
+    // reset the random stream every tick and go unnoticed until two fish rolled
+    // the same attack forever.
+    rngSeed: attack.seed,
     stage,
     // Only the reel-in has a duration to count, so every other stage seeds zero
     // and `stepEnding` never looks at it again.

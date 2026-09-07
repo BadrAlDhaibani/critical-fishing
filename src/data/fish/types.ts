@@ -119,11 +119,17 @@ export interface BandAttack {
    * Relative likelihood within its band. design.md section 3 gives each band "a
    * small weighted list", and this is that.
    *
-   * **Nothing reads this yet.** Weighted selection needs a source of randomness
-   * inside a `sim/` that is deliberately deterministic, which is its own task
-   * (roadmap open finding 3). Until it lands `attackForBand` throws on a list
-   * longer than one entry rather than quietly always picking the first, so a
-   * second attack cannot be added and appear to do nothing.
+   * Relative rather than absolute, so a band's weights only have to make sense
+   * against each other: `3` and `1` and `30` and `10` are the same band.
+   *
+   * **Read only when a band holds more than one attack.** A band with one entry
+   * has nothing to choose and `attackForBand` short-circuits without looking at
+   * the weight, which is every band on every fish in the game today — all four
+   * are `common`. It starts to matter at the first fish above common.
+   *
+   * Must be finite and greater than zero. A zero can never be drawn and a
+   * negative one lets the entry after it be drawn in its place, neither of which
+   * throws; `tests/fish.test.ts` is what refuses to register such a fish.
    */
   weight: number;
 }

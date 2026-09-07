@@ -140,6 +140,12 @@ type AttackFields = Pick<
 export interface FishAttackResult extends AttackFields {
   hullDamage: number;
   spawned: ProjectileState[];
+  /**
+   * The fight's random seed, advanced if this tick rolled and handed straight
+   * back if it did not. `stepFight` stores it; see `sim/rng.ts` for why it
+   * travels rather than being reached for.
+   */
+  seed: number;
 }
 
 /**
@@ -153,6 +159,7 @@ export interface FishAttackResult extends AttackFields {
 export function stepFishAttack(
   fish: Pick<FishState, 'x' | 'depth' | 'band' | 'definition'> & AttackFields,
   boatX: number,
+  seed: number,
 ): FishAttackResult {
   if (fish.attackPhase === 'idle') {
     // Counted down before the range check, so a cooldown expiring this tick
@@ -163,8 +170,27 @@ export function stepFishAttack(
       fish.attackCooldownRemaining - 1,
     );
 
-    const patternId = attackForBand(fish.definition, fish.band);
-    const pattern = patternById(fish.definition, patternId);
+    // Nothing is rolled while the cooldown runs, which is what this early return
+    // buys. `attackForBand` used to be called on every idle tick, which cost
+    // nothing when it could only ever answer one thing; now that it rolls, doing
+    // it here would churn the seed through a 45 to 90 tick cooldown to decide
+    // something the fish is not allowed to act on yet. The roll now happens on
+    // ticks the fish is actually ready to decide.
+    if (attackCooldownRemaining > 0) {
+      return {
+        attackPhase: 'idle',
+        attackPatternId: null,
+        attackPhaseTicksRemaining: 0,
+        attackCooldownRemaining,
+        attackHasHit: false,
+        hullDamage: 0,
+        spawned: [],
+        seed,
+      };
+    }
+
+    const choice = attackForBand(fish.definition, fish.band, seed);
+    const pattern = patternById(fish.definition, choice.patternId);
 
     // The band chose the attack; a melee column still gets a say in whether it is
     // worth starting. Its hitbox is usually a good deal narrower than the band
@@ -175,15 +201,16 @@ export function stepFishAttack(
       pattern.behaviour !== 'meleeColumn' ||
       meleeColumnHits(pattern, fish.x, boatX);
 
-    if (attackCooldownRemaining === 0 && canCommit) {
+    if (canCommit) {
       return {
         attackPhase: 'windUp',
-        attackPatternId: patternId,
+        attackPatternId: choice.patternId,
         attackPhaseTicksRemaining: pattern.windUpTicks,
         attackCooldownRemaining: 0,
         attackHasHit: false,
         hullDamage: 0,
         spawned: [],
+        seed: choice.seed,
       };
     }
 
@@ -198,6 +225,21 @@ export function stepFishAttack(
       attackHasHit: false,
       hullDamage: 0,
       spawned: [],
+      // The roll it made and could not use is kept, so a fish off cooldown but
+      // out of reach draws again next tick rather than the same card forever.
+      // That has to be so: holding the seed would leave a fish that drew a lunge
+      // it cannot reach with unable to ever draw anything else, standing there
+      // until the boat happened to walk into that one attack.
+      //
+      // The honest consequence, worth knowing before a band mixes a lunge with a
+      // volley: re-drawing until something commits means the choice is filtered
+      // by what the current distance allows, so a fish sat outside its own hitbox
+      // reaches for the volley more often than the raw weights say. That is the
+      // behaviour worth having rather than a flaw to design around — the
+      // alternative is a fish repeatedly committing to a swing that cannot land —
+      // but it does mean weights describe what the fish *prefers*, not the split
+      // you will observe across a fight.
+      seed: choice.seed,
     };
   }
 
@@ -228,6 +270,7 @@ export function stepFishAttack(
           attackHasHit: false,
           hullDamage: 0,
           spawned: [],
+          seed,
         };
       }
 
@@ -241,6 +284,7 @@ export function stepFishAttack(
         attackHasHit: false,
         hullDamage: 0,
         spawned: [],
+        seed,
       };
     }
 
@@ -266,6 +310,7 @@ export function stepFishAttack(
           attackHasHit: fish.attackHasHit || connects,
           hullDamage: connects ? pattern.hullDamage : 0,
           spawned: [],
+          seed,
         };
       }
 
@@ -284,6 +329,7 @@ export function stepFishAttack(
         // the boat, the same way a melee column only reads it while its hitbox is
         // open: the tell that came before it was committed to blind.
         spawned: firing ? [lob(pattern, fish.x, fish.depth, boatX)] : [],
+        seed,
       };
     }
 
@@ -299,6 +345,7 @@ export function stepFishAttack(
           attackHasHit: fish.attackHasHit,
           hullDamage: 0,
           spawned: [],
+          seed,
         };
       }
 
@@ -312,6 +359,7 @@ export function stepFishAttack(
         attackHasHit: false,
         hullDamage: 0,
         spawned: [],
+        seed,
       };
     }
   }
